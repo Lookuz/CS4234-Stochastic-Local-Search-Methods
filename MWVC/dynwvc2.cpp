@@ -12,8 +12,8 @@ using namespace std;
 typedef long long llong;
 typedef unsigned int uint;
 
-#define pop(stack) stack[--stack ## _fill_pointer]
-#define push(item, stack) stack[stack ## _fill_pointer++] = item
+#define pop(stack) stack[--stack ## fillPointer]
+#define push(item, stack) stack[stack ## fillPointer++] = item
 
 struct Edge {
     int v1;
@@ -29,122 +29,121 @@ int N, E;
 // Learning Parameters
 uint seed;
 int noImproveMax; // Max number of iterations before no improvement in vertex chosen to be removed. Initial 5
-double cutoff_time; // Max run time. Note that this only takes into account construction of VC and SLS
+double cutoffTime; // Max run time. Note that this only takes into account construction of VC and SLS
 int mode;
-int try_step;
-llong max_steps, step;
+int tryStep;
+llong maxSteps, step;
 
 // Graph Construction variables
 Edge *edge;
-int *edge_weight;
-int *vertex_cost;
-int **v_edges;
-int **v_adj;
-int *vertex_degree;
+int *edgeWeight;
+int *vertexCost;
+int **vertexEdges;
+int **adjList;
+int *vertexDegree;
 
 // Search Heuristic scoring criteria
 int *dscore;
-int *valid_score;
-llong *time_stamp;
+int *validScore;
+llong *timeStamp;
 
 // Best Parameters
-int best_cover_size;
-int *best_vertex_cover;
-double best_comp_time;
-llong best_step, best_weight;
+int bestCoverSize;
+int *bestVertexCover;
+double bestCompTime;
+llong bestStep, bestWeight;
 
 // Edge Stack Parameters
-int uncov_stack_fill_pointer;
-int *uncov_stack;
-int *index_in_uncov_stack;
+int uncoveredStackfillPointer;
+int *uncoveredStack;
+int *uncoveredStackIndex;
 
 // Computation variables
-int avg_weight, delta_total_weight, threshold, c_size, remove_cand_size;
-int *vertex_cover;
-int *remove_candidates;
-int *remove_candidates_index;
-double p_scale;
-llong curr_weight;
+int avgWeight, deltaTotalWeight, threshold, coverSize, removeCandidateSize;
+int *vertexCover;
+int *removeCandidates;
+int *removeCandiatesIndex;
+double pScale;
+llong currWeight;
 
 // Returns execution time in seconds
-double TimeElapsed() {
+double getElapsedTime() {
     chrono::steady_clock::time_point finish = chrono::steady_clock::now();
     chrono::duration<double> duration = finish - start;
     return duration.count();
 }
 
 // Builds Instance of the original graph
-int BuildInstance() {
-    int v, e;
-    int v1, v2;
+int constructGraph() {
+    int v, e, v1, v2;
 
     cin >> N >> E;
 
     edge = new Edge[E];
-    edge_weight = new int[E];
-    uncov_stack = new int[E];
-    index_in_uncov_stack = new int[E];
+    edgeWeight = new int[E];
+    uncoveredStack = new int[E];
+    uncoveredStackIndex = new int[E];
     dscore = new int[N + 1];
-    valid_score = new int[N +1]; 
-    time_stamp = new llong[N + 1];
-    v_edges = new int *[N + 1];
-    v_adj = new int *[N + 1];
-    vertex_degree = new int[N + 1];
-    vertex_cost = new int[N + 1];
-    vertex_cover = new int[N + 1];
-    remove_candidates = new int[N + 1];
-    remove_candidates_index = new int[N + 1];
-    best_vertex_cover = new int[N + 1];
+    validScore = new int[N +1]; 
+    timeStamp = new llong[N + 1];
+    vertexEdges = new int *[N + 1];
+    adjList = new int *[N + 1];
+    vertexDegree = new int[N + 1];
+    vertexCost = new int[N + 1];
+    vertexCover = new int[N + 1];
+    removeCandidates = new int[N + 1];
+    removeCandiatesIndex = new int[N + 1];
+    bestVertexCover = new int[N + 1];
 
-    fill_n(vertex_degree, N + 1, 0); // Degree of vertex; for increasing search neighbourhood
-    fill_n(vertex_cover, N + 1, 0); // Marks whether vertex in cover
+    fill_n(vertexDegree, N + 1, 0); // Degree of vertex; for increasing search neighbourhood
+    fill_n(vertexCover, N + 1, 0); // Marks whether vertex in cover
     fill_n(dscore, N + 1, 0); 
-    fill_n(time_stamp, N + 1, 0);
-    fill_n(edge_weight, E, 1);
-    fill_n(valid_score, N + 1, 1000000); // scoring criteria for heuristic
+    fill_n(timeStamp, N + 1, 0);
+    fill_n(edgeWeight, E, 1);
+    fill_n(validScore, N + 1, 1000000); // scoring criteria for heuristic
 
     // Vertex cost
     for (v = 1; v < N + 1; v++) {
-        cin >> vertex_cost[v];
+        cin >> vertexCost[v];
     }
 
     // Edges
-    // NOTE: Post-processing done to add 1 to weights
+    // NOTE: Post-processing done to addVertex 1 to weights
     // Following DIMACS format
     for (e = 0; e < E; e++) {
         cin >> v1 >> v2;
-        vertex_degree[v1 + 1]++;
-        vertex_degree[v2 + 1]++;
+        vertexDegree[v1 + 1]++;
+        vertexDegree[v2 + 1]++;
 
         edge[e].v1 = v1 + 1;
         edge[e].v2 = v2 + 1;
     }
 
-    v_adj[0] = 0;
-    v_edges[0] = 0;
+    adjList[0] = 0;
+    vertexEdges[0] = 0;
     for (v = 1; v < N + 1; v++) {
-        v_adj[v] = new int[vertex_degree[v]];
-        v_edges[v] = new int[vertex_degree[v]];
+        adjList[v] = new int[vertexDegree[v]];
+        vertexEdges[v] = new int[vertexDegree[v]];
     }
 
-    int *v_degree_tmp = new int[N + 1];
-    fill_n(v_degree_tmp, N + 1, 0);
+    int *tempVertexDegree = new int[N + 1];
+    fill_n(tempVertexDegree, N + 1, 0);
 
     for (e = 0; e < E; e++) {
         v1 = edge[e].v1;
         v2 = edge[e].v2;
 
-        v_edges[v1][v_degree_tmp[v1]] = e;
-        v_edges[v2][v_degree_tmp[v2]] = e;
+        vertexEdges[v1][tempVertexDegree[v1]] = e;
+        vertexEdges[v2][tempVertexDegree[v2]] = e;
 
-        v_adj[v1][v_degree_tmp[v1]] = v2;
-        v_adj[v2][v_degree_tmp[v2]] = v1;
+        adjList[v1][tempVertexDegree[v1]] = v2;
+        adjList[v2][tempVertexDegree[v2]] = v1;
 
-        v_degree_tmp[v1]++;
-        v_degree_tmp[v2]++;
+        tempVertexDegree[v1]++;
+        tempVertexDegree[v2]++;
     }
 
-    delete[] v_degree_tmp;
+    delete[] tempVertexDegree;
 
     return 0;
 }
@@ -154,161 +153,162 @@ void ResetRemoveCand() {
     int j = 0;
 
     for (v = 1; v < N + 1; v++) {
-        if (vertex_cover[v] == 1) {
-            remove_candidates[j] = v;
-            remove_candidates_index[v] = j;
+        if (vertexCover[v] == 1) {
+            removeCandidates[j] = v;
+            removeCandiatesIndex[v] = j;
             j++;
 
             // Update score criteria: Sum of cost of neighbours - current vertex cost
             // Higher is better -> greater decrease in cost
-            valid_score[v] = -vertex_cost[v];
-            degree = vertex_degree[v];
+            validScore[v] = -vertexCost[v];
+            degree = vertexDegree[v];
             for (i = 0; i < degree; i++) {
-            	if (vertex_cover[v_adj[v][i]]==0) {
-            		valid_score[v] += vertex_cost[v_adj[v][i]];
+            	if (vertexCover[adjList[v][i]]==0) {
+            		validScore[v] += vertexCost[adjList[v][i]];
 				}
 			}            
         } else {
-            remove_candidates_index[v] = 0;
+            removeCandiatesIndex[v] = 0;
         }
     }
 
-    remove_cand_size = j;
+    removeCandidateSize = j;
 }
 
 // Set edge to uncovered
-inline void Uncover(int e) {
-    index_in_uncov_stack[e] = uncov_stack_fill_pointer;
-    push(e, uncov_stack);
+inline void uncoverEdge(int e) {
+    uncoveredStackIndex[e] = uncoveredStackfillPointer;
+    push(e, uncoveredStack);
 }
 
 // Cover next uncovered edge
-inline void Cover(int e) {
-    int index, last_uncov_edge;
-    last_uncov_edge = pop(uncov_stack);
-    index = index_in_uncov_stack[e];
-    uncov_stack[index] = last_uncov_edge;
-    index_in_uncov_stack[last_uncov_edge] = index;
+inline void coverEdge(int e) {
+    int index, lastUncoveredEdge;
+    lastUncoveredEdge = pop(uncoveredStack);
+    index = uncoveredStackIndex[e];
+    uncoveredStack[index] = lastUncoveredEdge;
+    uncoveredStackIndex[lastUncoveredEdge] = index;
 }
 
 // Removes a vertex from cover
-void Remove(int v) {
+void removeVertex(int v) {
     int i, e, n;
-    int edge_count = vertex_degree[v];
+    int edgeCount = vertexDegree[v];
 
-    vertex_cover[v] = 0;
-    c_size--;
+    vertexCover[v] = 0;
+    coverSize--;
     dscore[v] = -dscore[v]; // Flip from gain to loss
-    valid_score[v] = 1000000;
+    validScore[v] = 1000000;
 
-    int last_remove_cand_v = remove_candidates[--remove_cand_size];
-    int index = remove_candidates_index[v];
-    remove_candidates[index] = last_remove_cand_v;
-    remove_candidates_index[last_remove_cand_v] = index;
-    remove_candidates_index[v] = 0;
+    int last_remove_cand_v = removeCandidates[--removeCandidateSize];
+    int index = removeCandiatesIndex[v];
+    removeCandidates[index] = last_remove_cand_v;
+    removeCandiatesIndex[last_remove_cand_v] = index;
+    removeCandiatesIndex[v] = 0;
 
-    curr_weight -= vertex_cost[v];
+    currWeight -= vertexCost[v];
 
-    for (i = 0; i < edge_count; i++) {
-        e = v_edges[v][i];
-        n = v_adj[v][i];
+    for (i = 0; i < edgeCount; i++) {
+        e = vertexEdges[v][i];
+        n = adjList[v][i];
 
-        if (vertex_cover[n] == 0) {
-            dscore[n] += edge_weight[e];
-            Uncover(e);
+        if (vertexCover[n] == 0) {
+            dscore[n] += edgeWeight[e];
+            uncoverEdge(e);
         } else {
-            dscore[n] -= edge_weight[e];
-            valid_score[n] += vertex_cost[v];
+            dscore[n] -= edgeWeight[e];
+            validScore[n] += vertexCost[v];
         }
     }
 }
 
 // Adds vertex into vertex cover
-void Add(int v) {
+void addVertex(int v) {
     int i, e, n;
-    int edge_count = vertex_degree[v];
+    int edgeCount = vertexDegree[v];
    
-    vertex_cover[v] = 1; 
-    c_size++;
+    vertexCover[v] = 1; 
+    coverSize++;
     dscore[v] = -dscore[v];
-    curr_weight += vertex_cost[v];
-    valid_score[v] = -vertex_cost[v];
+    currWeight += vertexCost[v];
+    validScore[v] = -vertexCost[v];
     
-    remove_candidates[remove_cand_size] = v;
-    remove_candidates_index[v] = remove_cand_size++;
+    removeCandidates[removeCandidateSize] = v;
+    removeCandiatesIndex[v] = removeCandidateSize++;
 
     // Update scores
-    for (i = 0; i < edge_count; i++) {
-        e = v_edges[v][i];
-        n = v_adj[v][i];
+    for (i = 0; i < edgeCount; i++) {
+        e = vertexEdges[v][i];
+        n = adjList[v][i];
 
-        if (vertex_cover[n] == 0) { // Edge previously not covered
-            dscore[n] -= edge_weight[e];
-            Cover(e);
-            valid_score[v] += vertex_cost[n];
+        if (vertexCover[n] == 0) { // Edge previously not covered
+            dscore[n] -= edgeWeight[e];
+            coverEdge(e);
+            validScore[v] += vertexCost[n];
         } else {
-            dscore[n] += edge_weight[e];
-            valid_score[n] -= vertex_cost[v];
+            dscore[n] += edgeWeight[e];
+            validScore[n] -= vertexCost[v];
 
-            if(valid_score[n] == -vertex_cost[n]) {
-            	Remove(n);
+            if(validScore[n] == -vertexCost[n]) {
+            	removeVertex(n);
 			}
         }
     }
 }
 
 // Updates current best
-void UpdateBestSolution() {
+void updateBestSolution() {
     int v;
 
-    if (curr_weight < best_weight) {
+    if (currWeight < bestWeight) {
         for (v = 1; v < N + 1; v++) {
-            best_vertex_cover[v] = vertex_cover[v];
+            bestVertexCover[v] = vertexCover[v];
         }
-        best_weight = curr_weight;
-        best_cover_size = c_size;
-        best_comp_time = TimeElapsed();
-        best_step = step;
+        bestWeight = currWeight;
+        bestCoverSize = coverSize;
+        bestCompTime = getElapsedTime();
+        bestStep = step;
     }
 }
 
 // Constructs initial vertex cover
-void ConstructVC() {
+void constructVertexCover() {
     int e;
     int v1, v2;
-    double v1dd, v2dd;
+    // Use loss function score to pick vertices
+    double v1score, v2score; 
 
-    uncov_stack_fill_pointer = 0;
-    c_size = 0;
-    best_weight = (int)(~0U >> 1);
-    curr_weight = 0;
+    uncoveredStackfillPointer = 0;
+    coverSize = 0;
+    bestWeight = (int)(~0U >> 1);
+    currWeight = 0;
 
     for (e = 0; e < E; e++) {
         v1 = edge[e].v1;
         v2 = edge[e].v2;
 
-        if (vertex_cover[v1] == 0 && vertex_cover[v2] == 0) { // Edge not covered
-            v1dd = (double)vertex_degree[v1] / (double)vertex_cost[v1];
-            v2dd = (double)vertex_degree[v2] / (double)vertex_cost[v2];
+        if (vertexCover[v1] == 0 && vertexCover[v2] == 0) { // Edge not covered
+            v1score = (double)vertexDegree[v1] / (double)vertexCost[v1];
+            v2score = (double)vertexDegree[v2] / (double)vertexCost[v2];
             // Bigger ratio -> lower cost
-            if (v1dd > v2dd) {
-                vertex_cover[v1] = 1;
-                curr_weight += vertex_cost[v1];
+            if (v1score > v2score) {
+                vertexCover[v1] = 1;
+                currWeight += vertexCost[v1];
             } else {
-                vertex_cover[v2] = 1;
-                curr_weight += vertex_cost[v2];
+                vertexCover[v2] = 1;
+                currWeight += vertexCost[v2];
             }
-            c_size++;
+            coverSize++;
         }
     }
 
-    int *save_v_in_c = new int[N + 1]; // Save current best
-    memcpy(save_v_in_c, vertex_cover, sizeof(int) * (N + 1));
-    int save_c_size = c_size;
-    llong save_weight = curr_weight;
+    int *savedVertexCover = new int[N + 1]; // Save current best
+    memcpy(savedVertexCover, vertexCover, sizeof(int) * (N + 1));
+    int savedCoverSize = coverSize;
+    llong savedWeight = currWeight;
 
     // BMS Algorithm
-    int times = 50; // Number of iterations of random pick
+    int times = 50; // Number of iterations of random pick. NOTE: Can be tuneds
     vector<int> blocks(E / 1024 + 1);
     for (int i = 0; i < E / 1024 + 1; i++) {
         blocks[i] = i;
@@ -316,109 +316,110 @@ void ConstructVC() {
 
     // Run BMS algorithm to pick vertices
     while (times-- > 0) {
-        fill_n(vertex_cover, N + 1, 0);
-        c_size = 0;
-        curr_weight = 0;
+        fill_n(vertexCover, N + 1, 0);
+        coverSize = 0;
+        currWeight = 0;
         shuffle(blocks.begin(), blocks.end(), default_random_engine(seed));
 
         for (auto &block : blocks) {
             auto begin = block * 1024;
             auto end = block == E / 1024 ? E : begin + 1024;
-            int tmpsize = end - begin + 1;
-            vector<int> idx(tmpsize);
+            int tempSize = end - begin + 1;
+            vector<int> idx(tempSize);
 
             for (int i = begin; i < end; i++) {
                 idx[i - begin] = i;
             }
 
-            while (tmpsize > 0) {
-                int i = rand() % tmpsize;
+            while (tempSize > 0) {
+                int i = rand() % tempSize;
                 Edge e = edge[idx[i]];
                 v1 = e.v1;
                 v2 = e.v2;
 
                 // BMS: pick random vertex and exchange
-                swap(idx[i], idx[--tmpsize]);
-                if (vertex_cover[v1] == 0 && vertex_cover[v2] == 0) {
-                    v1dd = (double)vertex_degree[v1] / (double)vertex_cost[v1];
-                    v2dd = (double)vertex_degree[v2] / (double)vertex_cost[v2];
-                    if (v1dd > v2dd) {
-                        vertex_cover[v1] = 1;
-                        curr_weight += vertex_cost[v1];
+                swap(idx[i], idx[--tempSize]);
+                if (vertexCover[v1] == 0 && vertexCover[v2] == 0) {
+                    v1score = (double)vertexDegree[v1] / (double)vertexCost[v1];
+                    v2score = (double)vertexDegree[v2] / (double)vertexCost[v2];
+
+                    if (v1score > v2score) {
+                        vertexCover[v1] = 1;
+                        currWeight += vertexCost[v1];
                     } else {
-                        vertex_cover[v2] = 1;
-                        curr_weight += vertex_cost[v2];
+                        vertexCover[v2] = 1;
+                        currWeight += vertexCost[v2];
                     }
 
-                    c_size++;
+                    coverSize++;
                 }
             }
         }
 
         // Save current best
-        if (curr_weight < save_weight) {
-            save_weight = curr_weight;
-            save_c_size = c_size;
-            memcpy(save_v_in_c, vertex_cover, sizeof(int) * (N + 1));
+        if (currWeight < savedWeight) {
+            savedWeight = currWeight;
+            savedCoverSize = coverSize;
+            memcpy(savedVertexCover, vertexCover, sizeof(int) * (N + 1));
         }
     }
 
     // Update back
-    curr_weight = save_weight;
-    c_size = save_c_size;
-    memcpy(vertex_cover, save_v_in_c, sizeof(int) * (N + 1));
-    delete[] save_v_in_c;
+    currWeight = savedWeight;
+    coverSize = savedCoverSize;
+    memcpy(vertexCover, savedVertexCover, sizeof(int) * (N + 1));
+    delete[] savedVertexCover;
 
     for (e = 0; e < E; e++) {
         v1 = edge[e].v1;
         v2 = edge[e].v2;
 
-        if (vertex_cover[v1] == 1 && vertex_cover[v2] == 0) {
-            dscore[v1] -= edge_weight[e];
-        } else if (vertex_cover[v2] == 1 && vertex_cover[v1] == 0) {
-            dscore[v2] -= edge_weight[e];
+        if (vertexCover[v1] == 1 && vertexCover[v2] == 0) {
+            dscore[v1] -= edgeWeight[e];
+        } else if (vertexCover[v2] == 1 && vertexCover[v1] == 0) {
+            dscore[v2] -= edgeWeight[e];
         }
     }
 
     ResetRemoveCand();
     for (int v = 1; v < N + 1; v++) {
-        if (vertex_cover[v] == 1 && dscore[v] == 0) {
-            Remove(v);
+        if (vertexCover[v] == 1 && dscore[v] == 0) {
+            removeVertex(v);
         }
     }
 
-    UpdateBestSolution();
+    updateBestSolution();
 }
 
 // Checks if solution is valid
-int CheckSolution() {
+bool isValidSolution() {
     int e, v;
 
     for (e = 0; e < E; ++e) {
-        if (best_vertex_cover[edge[e].v1] != 1 && best_vertex_cover[edge[e].v2] != 1) {
-            cout << ", uncovered edge " << e;
-            return 0;
+        // Not covered
+        if (bestVertexCover[edge[e].v1] != 1 && bestVertexCover[edge[e].v2] != 1) {
+            return false;
         }
     }
 
-    return 1;
+    return true;
 }
 
-int UpdateTargetSize() {
+int updateTargetSize() {
     int v;
     int best_remove_v;
     double best_dscore;
     double dscore_v;
 
-    best_remove_v = remove_candidates[0];
-    best_dscore = (double)(vertex_cost[best_remove_v]) / (double)abs(dscore[best_remove_v]);
+    best_remove_v = removeCandidates[0];
+    best_dscore = (double)(vertexCost[best_remove_v]) / (double)abs(dscore[best_remove_v]);
 
     if (dscore[best_remove_v] != 0) {
-        for (int i = 1; i < remove_cand_size; i++) {
-            v = remove_candidates[i];
+        for (int i = 1; i < removeCandidateSize; i++) {
+            v = removeCandidates[i];
             if (dscore[v] == 0) break;
 
-            dscore_v = (double)(vertex_cost[v]) / (double)abs(dscore[v]);
+            dscore_v = (double)(vertexCost[v]) / (double)abs(dscore[v]);
             if (dscore_v > best_dscore){
                 best_dscore = dscore_v;
                 best_remove_v = v;
@@ -426,71 +427,71 @@ int UpdateTargetSize() {
         }
     }
 
-    Remove(best_remove_v);
+    removeVertex(best_remove_v);
     return best_remove_v;
 }
 
-void ForgetEdgeWeights() {
+void clearEdgeWeights() {
     int v, e;
-    int new_total_weitght = 0;
+    int newTotalWeight = 0;
 
     for (v = 1; v < N + 1; v++) {
         dscore[v] = 0;
     }
 
     for (e = 0; e < E; e++) {
-        edge_weight[e] = edge_weight[e] * p_scale;
-        new_total_weitght += edge_weight[e];
+        edgeWeight[e] = edgeWeight[e] * pScale;
+        newTotalWeight += edgeWeight[e];
 
-        if (vertex_cover[edge[e].v1] + vertex_cover[edge[e].v2] == 0) {
-            dscore[edge[e].v1] += edge_weight[e];
-            dscore[edge[e].v2] += edge_weight[e];
-        } else if (vertex_cover[edge[e].v1] + vertex_cover[edge[e].v2] == 1) {
-            if (vertex_cover[edge[e].v1] == 1) {
-                dscore[edge[e].v1] -= edge_weight[e];
+        if (vertexCover[edge[e].v1] + vertexCover[edge[e].v2] == 0) {
+            dscore[edge[e].v1] += edgeWeight[e];
+            dscore[edge[e].v2] += edgeWeight[e];
+        } else if (vertexCover[edge[e].v1] + vertexCover[edge[e].v2] == 1) {
+            if (vertexCover[edge[e].v1] == 1) {
+                dscore[edge[e].v1] -= edgeWeight[e];
             } else {
-                dscore[edge[e].v2] -= edge_weight[e];
+                dscore[edge[e].v2] -= edgeWeight[e];
             }
         }
     }
 
-    avg_weight = new_total_weitght / E;
+    avgWeight = newTotalWeight / E;
 }
 
-void UpdateEdgeWeight() {
+void updateEdgeWeight() {
     int i, e;
 
-    for (i = 0; i < uncov_stack_fill_pointer; i++) {
-        e = uncov_stack[i];
-        edge_weight[e] += 1;
+    for (i = 0; i < uncoveredStackfillPointer; i++) {
+        e = uncoveredStack[i];
+        edgeWeight[e] += 1;
         dscore[edge[e].v1] += 1;
         dscore[edge[e].v2] += 1;
     }
 
-    delta_total_weight += uncov_stack_fill_pointer;
+    deltaTotalWeight += uncoveredStackfillPointer;
 
     if (mode / 2 == 1) {
-        if (delta_total_weight >= E) {
-            avg_weight += 1;
-            delta_total_weight -= E;
+        if (deltaTotalWeight >= E) {
+            avgWeight += 1;
+            deltaTotalWeight -= E;
         }
 
-        if (avg_weight >= threshold) {
-            ForgetEdgeWeights();
+        if (avgWeight >= threshold) {
+            clearEdgeWeights();
         }
     }
 }
 
-// Remove first vertex during dynamic choose -> Intensification
-// Uses deterministic valid_score to determine pick
-int ChooseRemoveV1() {
+// removeVertex first vertex during dynamic choose -> Intensification
+// Uses deterministic validScore to determine pick
+int chooseRemoveV1() {
     int i, v;
-    int remove_v = remove_candidates[0];
-    int improvement_remove = valid_score[remove_v],improvement_v;
+    int removeV1 = removeCandidates[0];
+    int improvement_remove = validScore[removeV1],improvement_v;
 
-    for (i = 1; i < remove_cand_size; i++) {
-    	v = remove_candidates[i];
-    	improvement_v = valid_score[v];
+    for (i = 1; i < removeCandidateSize; i++) {
+    	v = removeCandidates[i];
+    	improvement_v = validScore[v];
 
         // Pick vertex with minimum valid score -> lower cost
     	if (improvement_v > improvement_remove) {
@@ -498,198 +499,199 @@ int ChooseRemoveV1() {
 		}
 
     	if (improvement_v < improvement_remove) {
-    		remove_v = v;
+    		removeV1 = v;
     		improvement_remove = improvement_v;
-		} else if (time_stamp[v] < time_stamp[remove_v]) {
-			remove_v = v;
+		} else if (timeStamp[v] < timeStamp[removeV1]) {
+			removeV1 = v;
     		improvement_remove = improvement_v;
 		}
 	}
 
-	return remove_v;  
+	return removeV1;  
 }
 
-// Remove second vertex during dynamic choose -> Diversification
+// removeVertex second vertex during dynamic choose -> Diversification
 // Uses loss function to pick vertex
-int ChooseRemoveV2() {
+int chooseRemoveV2() {
     int i, v;
     double dscore_v, dscore_remove_v;
-    int remove_v = remove_candidates[rand() % remove_cand_size];
+    int removeV1 = removeCandidates[rand() % removeCandidateSize];
     int to_try = 50;
 
     for (i = 1; i < to_try; i++) {
 
-        v = remove_candidates[rand() % remove_cand_size];
+        v = removeCandidates[rand() % removeCandidateSize];
         // Using loss function
-        dscore_v = (double)vertex_cost[v] / (double)abs(dscore[v]);
-        dscore_remove_v = (double)vertex_cost[remove_v] / (double)abs(dscore[remove_v]);
+        dscore_v = (double)vertexCost[v] / (double)abs(dscore[v]);
+        dscore_remove_v = (double)vertexCost[removeV1] / (double)abs(dscore[removeV1]);
         
         if (dscore_v < dscore_remove_v) {
             continue;
         }
         
         if (dscore_v > dscore_remove_v) {
-            remove_v = v;
-        } else if (time_stamp[v] < time_stamp[remove_v]) {
-            remove_v = v;
+            removeV1 = v;
+        } else if (timeStamp[v] < timeStamp[removeV1]) {
+            removeV1 = v;
         }
     }
 
-    return remove_v;
+    return removeV1;
 }
 
 // Picks vertex to cover uncovered edge
-int ChooseAddV(int update_v, int remove_v = 0, int remove_v2 = 0) {
+int chooseAddV(int updateV, int removeV1 = 0, int removeV2 = 0) {
     int i, v;
-    int add_v = 0;
+    int addV = 0;
     double improvement = 0.0;
     double dscore_v;
 
-    int tmp_degree = vertex_degree[update_v];
-    int *adjp = v_adj[update_v];
+    int tmp_degree = vertexDegree[updateV];
+    int *adjp = adjList[updateV];
 
     for (i = 0; i < tmp_degree; i++) {
 
         v = adjp[i];
-        if (vertex_cover[v] == 1) { // Edge covered
+        if (vertexCover[v] == 1) { // Edge covered
             continue;
         }
 
-        dscore_v = (double)dscore[v] / (double)(vertex_cost[v]);
+        dscore_v = (double)dscore[v] / (double)(vertexCost[v]);
         if (dscore_v > improvement) {
                 improvement = dscore_v;
-                add_v = v;
+                addV = v;
         } else if (dscore_v == improvement) {
-            if (time_stamp[v] < time_stamp[add_v]) {
-                add_v = v;
+            if (timeStamp[v] < timeStamp[addV]) {
+                addV = v;
             }
         }
     }
 
     // Try to pick better update from removed v1
-    if (remove_v != 0) {
-        tmp_degree = vertex_degree[remove_v];
-        adjp = v_adj[remove_v];
+    if (removeV1 != 0) {
+        tmp_degree = vertexDegree[removeV1];
+        adjp = adjList[removeV1];
         for (i = 0; i < tmp_degree; i++) {
             v = adjp[i];
-            if (vertex_cover[v] == 1) {
+            if (vertexCover[v] == 1) {
                 continue;
             }
 
-            dscore_v = (double)dscore[v] / (double)(vertex_cost[v]);
+            dscore_v = (double)dscore[v] / (double)(vertexCost[v]);
             if (dscore_v > improvement) {
                 improvement = dscore_v;
-                add_v = v;
+                addV = v;
             } else if (dscore_v == improvement) {
-                if (time_stamp[v] < time_stamp[add_v]) {
-                    add_v = v;
+                if (timeStamp[v] < timeStamp[addV]) {
+                    addV = v;
                 }
             }
         }
     }
 
     // Try to pick better update from removed v2
-    if (remove_v2 != 0) {
-        tmp_degree = vertex_degree[remove_v2];
-        adjp = v_adj[remove_v2];
+    if (removeV2 != 0) {
+        tmp_degree = vertexDegree[removeV2];
+        adjp = adjList[removeV2];
         for (i = 0; i < tmp_degree; i++) {
             v = adjp[i];
-            if (vertex_cover[v] == 1) {
+            if (vertexCover[v] == 1) {
                 continue;
             }
-            dscore_v = (double)dscore[v] / (double)(vertex_cost[v]);
+            dscore_v = (double)dscore[v] / (double)(vertexCost[v]);
             if (dscore_v > improvement) {
                 improvement = dscore_v;
-                add_v = v;
+                addV = v;
             } else if (dscore_v == improvement) {
-                if (time_stamp[v] < time_stamp[add_v]) {
-                    add_v = v;
+                if (timeStamp[v] < timeStamp[addV]) {
+                    addV = v;
                 }
             }
         }
     }
 
-    return add_v;
+    return addV;
 }
 
 // Performs local search on current VC to update weight
-void LocalSearch() {
+void localSearch() {
 
-    int add_v, remove_v = 0, update_v = 0,remove_v2 = 0;
-    int noimprovement = 0, dyn_count = 0,temp_weight;
+    int addV, removeV1 = 0, updateV = 0, removeV2 = 0;
+    int noImprovement = 0, dynCount = 0, tempWeight;
     step = 1;
-    try_step = 100; // NOTE: Can be tuned
-    int remove_degree = 0;
+    tryStep = 100; // NOTE: Can be tuned
+    int removeDegree = 0;
 
-    avg_weight = 1;
-    delta_total_weight = 0;
-    p_scale = 0.3;
+    avgWeight = 1;
+    deltaTotalWeight = 0;
+    pScale = 0.3;
     threshold = (int)(0.5 * N);
 
     // Dynamic choose algorithm
     while (true) {
-        temp_weight = curr_weight;		
-        UpdateBestSolution();      
-        update_v = UpdateTargetSize();       
-        time_stamp[update_v] = step;
-        if (step % try_step == 0) {
-            if (TimeElapsed() >= cutoff_time) {
+        tempWeight = currWeight;		
+        updateBestSolution();      
+        updateV = updateTargetSize();       
+        timeStamp[updateV] = step;
+        if (step % tryStep == 0) {
+            if (getElapsedTime() >= cutoffTime) {
                 return;
             }
         }
  
-        if (noimprovement < noImproveMax) {
-            remove_v = ChooseRemoveV1();
-            Remove(remove_v);		
-            time_stamp[remove_v] = step;
+        if (noImprovement < noImproveMax) {
+            removeV1 = chooseRemoveV1();
+            removeVertex(removeV1);		
+            timeStamp[removeV1] = step;
 
         } else {
-            if (noimprovement == noImproveMax) {
-                dyn_count = 2;
+            if (noImprovement == noImproveMax) {
+                dynCount = 2;
             } 
             
-            if (dyn_count == 1) {
-                noimprovement = 0;
+            if (dynCount == 1) {
+                noImprovement = 0;
             }
 
-            remove_v = ChooseRemoveV2();
-            Remove(remove_v);		
-            time_stamp[remove_v] = step;
-            dyn_count--;
+            removeV1 = chooseRemoveV2();
+            removeVertex(removeV1);		
+            timeStamp[removeV1] = step;
+            dynCount--;
         }
 
-        remove_degree = vertex_degree[update_v] + vertex_degree[remove_v];
+        removeDegree = vertexDegree[updateV] + vertexDegree[removeV1];
         // If v1 and v2 total degree < 2 * average degree, increase search space
         // By removing one more vertex
         // NOTE: Can be tuned, but not recommended
-        if (remove_degree < 2 * E / N) {   
-            remove_v2 = ChooseRemoveV2();
-            Remove(remove_v2);
-            time_stamp[remove_v2] = step;
+        if (removeDegree < 2 * E / N) {   
+            removeV2 = chooseRemoveV2();
+            removeVertex(removeV2);
+            timeStamp[removeV2] = step;
         }   
 
-        while (uncov_stack_fill_pointer > 0) {
-            add_v = ChooseAddV(update_v, remove_v, remove_v2);
-            Add(add_v);            
-            UpdateEdgeWeight();
-            time_stamp[add_v] = step;
+        // Cover all edges
+        while (uncoveredStackfillPointer > 0) {
+            addV = chooseAddV(updateV, removeV1, removeV2);
+            addVertex(addV);            
+            updateEdgeWeight();
+            timeStamp[addV] = step;
         }
 
         step++;
-        remove_v2 = 0;  
+        removeV2 = 0;  
 
-        if (curr_weight >= temp_weight) {
-            noimprovement += 1;
+        if (currWeight >= tempWeight) {
+            noImprovement += 1;
         }
 
-        remove_degree = 0; 
+        removeDegree = 0; 
     }   
 }
 
 int main(void) {
     // Learning Parameters -> Tune these parameters
-    uint seed = 0; // Random seed
-    cutoff_time = 1.95; // Set cutoff time
+    uint seed = chrono::high_resolution_clock::now().time_since_epoch().count(); // Random seed
+    cutoffTime = 1.95; // Set cutoff time
     noImproveMax = 5;
 
     srand(seed);
@@ -699,20 +701,21 @@ int main(void) {
     start = chrono::steady_clock::now();
 
     // Build original graph
-    BuildInstance();
+    constructGraph();
 
     // Construct initial vertex cover
-    ConstructVC();
+    constructVertexCover();
     // Run SLS
-    LocalSearch();
+    localSearch();
 
-    if (CheckSolution() == 1) {
-        cout << best_weight << endl;
+    if (isValidSolution()) {
+        cout << bestWeight << endl;
         for (int i = 1; i <= N; i++) {
-            if (best_vertex_cover[i] == 1) {
+            if (bestVertexCover[i] == 1) {
                 printf("%d ", i - 1);
             }
         }
+
         printf("\n");
     }
 

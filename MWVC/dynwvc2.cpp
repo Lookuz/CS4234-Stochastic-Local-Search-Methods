@@ -1,16 +1,35 @@
-#include <iostream>
-#include <fstream>
+#include <stdio.h>
+#include <math.h>
+#include <string.h>
 #include <chrono>
-#include <iomanip>
 #include <string>
 #include <algorithm>
 #include <random>
-#include <cmath>
-#include <cstring>
 using namespace std;
 
 typedef long long llong;
 typedef unsigned int uint;
+
+#define USE_MERSENNE_TWISTER_RAND 1
+struct Random {
+#if USE_MERSENNE_TWISTER_RAND
+    mt19937 mt_rand;
+    Random(int seed) : mt_rand(seed) {}
+
+    // Get random number between [0, N)
+    uint get(int N) {
+        // Should we use std::uniform_int_distribution instead of % N?
+        return mt_rand() % N;
+    }
+#else
+    Random(int seed) : { srand(seed); }
+
+    // Get random number between [0, N)
+    uint get(int N) {
+        return rand() % N;
+    }
+#endif
+} random(0); // Use this like "random.get(N)"
 
 #define pop(stack) stack[--stack ## fillPointer]
 #define push(item, stack) stack[stack ## fillPointer++] = item
@@ -77,7 +96,7 @@ double getElapsedTime() {
 int constructGraph() {
     int v, e, v1, v2;
 
-    cin >> N >> E;
+    scanf(" %d %d", &N, &E);
 
     edge = new Edge[E];
     edgeWeight = new int[E];
@@ -104,14 +123,14 @@ int constructGraph() {
 
     // Vertex cost
     for (v = 1; v < N + 1; v++) {
-        cin >> vertexCost[v];
+        scanf(" %d", &vertexCost[v]);
     }
 
     // Edges
     // NOTE: Post-processing done to addVertex 1 to weights
     // Following DIMACS format
     for (e = 0; e < E; e++) {
-        cin >> v1 >> v2;
+        scanf(" %d %d", &v1, &v2);
         vertexDegree[v1 + 1]++;
         vertexDegree[v2 + 1]++;
 
@@ -332,7 +351,7 @@ void constructVertexCover() {
             }
 
             while (tempSize > 0) {
-                int i = rand() % tempSize;
+                int i = random.get(tempSize);
                 Edge e = edge[idx[i]];
                 v1 = e.v1;
                 v2 = e.v2;
@@ -515,12 +534,11 @@ int chooseRemoveV1() {
 int chooseRemoveV2() {
     int i, v;
     double dscore_v, dscore_remove_v;
-    int removeV1 = removeCandidates[rand() % removeCandidateSize];
+    int removeV1 = removeCandidates[random.get(removeCandidateSize)];
     int to_try = 50;
 
     for (i = 1; i < to_try; i++) {
-
-        v = removeCandidates[rand() % removeCandidateSize];
+        v = removeCandidates[random.get(removeCandidateSize)];
         // Using loss function
         dscore_v = (double)vertexCost[v] / (double)abs(dscore[v]);
         dscore_remove_v = (double)vertexCost[removeV1] / (double)abs(dscore[removeV1]);
@@ -690,14 +708,11 @@ void localSearch() {
 
 int main(void) {
     // Learning Parameters -> Tune these parameters
-    uint seed = chrono::high_resolution_clock::now().time_since_epoch().count(); // Random seed
+    seed = chrono::high_resolution_clock::now().time_since_epoch().count(); // Random seed
     cutoffTime = 1.95; // Set cutoff time
     noImproveMax = 5;
 
-    srand(seed);
-
-    ios_base::sync_with_stdio(false);
-    cin.tie(NULL);
+    random = Random(seed);
     start = chrono::steady_clock::now();
 
     // Build original graph
@@ -709,7 +724,7 @@ int main(void) {
     localSearch();
 
     if (isValidSolution()) {
-        cout << bestWeight << endl;
+        printf("%I64d\n", bestWeight);
         for (int i = 1; i <= N; i++) {
             if (bestVertexCover[i] == 1) {
                 printf("%d ", i - 1);

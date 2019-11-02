@@ -690,7 +690,7 @@ void localSearch() {
 
 int main(void) {
     // Learning Parameters -> Tune these parameters
-    uint seed = 0; // Random seed
+    uint seed = chrono::high_resolution_clock::now().time_since_epoch().count(); // Random seed
     cutoffTime = 1.95; // Set cutoff time
     noImproveMax = 5;
 

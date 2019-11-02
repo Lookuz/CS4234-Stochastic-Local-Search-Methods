@@ -29,7 +29,7 @@ struct Random {
         return rand() % N;
     }
 #endif
-} random(0); // Use this like "random.get(N)"
+} RAND(0); // Use this like "RAND.get(N)"
 
 #define pop(stack) stack[--stack ## fillPointer]
 #define push(item, stack) stack[stack ## fillPointer++] = item
@@ -351,7 +351,7 @@ void constructVertexCover() {
             }
 
             while (tempSize > 0) {
-                int i = random.get(tempSize);
+                int i = RAND.get(tempSize);
                 Edge e = edge[idx[i]];
                 v1 = e.v1;
                 v2 = e.v2;
@@ -534,11 +534,11 @@ int chooseRemoveV1() {
 int chooseRemoveV2() {
     int i, v;
     double dscore_v, dscore_remove_v;
-    int removeV1 = removeCandidates[random.get(removeCandidateSize)];
+    int removeV1 = removeCandidates[RAND.get(removeCandidateSize)];
     int to_try = 50;
 
     for (i = 1; i < to_try; i++) {
-        v = removeCandidates[random.get(removeCandidateSize)];
+        v = removeCandidates[RAND.get(removeCandidateSize)];
         // Using loss function
         dscore_v = (double)vertexCost[v] / (double)abs(dscore[v]);
         dscore_remove_v = (double)vertexCost[removeV1] / (double)abs(dscore[removeV1]);
@@ -712,7 +712,7 @@ int main(void) {
     cutoffTime = 1.95; // Set cutoff time
     noImproveMax = 5;
 
-    random = Random(seed);
+    RAND = Random(seed);
     start = chrono::steady_clock::now();
 
     // Build original graph

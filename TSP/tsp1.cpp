@@ -7,7 +7,9 @@
 #include <random>
 #include <stack>
 #include <queue>
+#include <cassert>
 
+#include "tour.h"
 #include "matrix.h"
 
 #ifdef DEBUG
@@ -23,7 +25,7 @@ random_device rd;
 default_random_engine rng(rd());
 
 // Size of nearest neighbors matrix.
-const static size_t MAX_K = 20;
+const static size_t MAX_K = 15;
 
 void toposortHelper(int u, vector<vector<int>> &adjList, vector<int> &dfs_num, vector<int> &ts) {
     dfs_num[u] = 1; // visited
@@ -46,6 +48,12 @@ vector<int> toposort(vector<vector<int>> &adjList) {
 }
 
 // ---------------- Helper functions -------------------------------------------------
+
+void printVec(vector<int> v) {
+    for (const auto& n : v) {
+        std::cout << n << ", ";
+    }
+}
 
 // Return the current time.
 static inline chrono::time_point<chrono::high_resolution_clock> now() {
@@ -259,46 +267,8 @@ Matrix<long> createAlphaMatrix(Matrix<long> &adjMatrix) { // adjMatrix is square
             int v = topoList[j];
             betaMatrix[u][v] = betaMatrix[v][u] = max(betaMatrix[u][parent[v]], adjMatrix[v][parent[v]]);
             alphaMatrix[u][v] = alphaMatrix[v][u] = adjMatrix[u][v] - betaMatrix[u][v]; 
-        }
-        // alphaMatrix[i][i] = -1;
-        // vector<long> betaVector; betaVector.clear(); betaVector.assign(V, -1);
-        // // first compute alpha(i, firstNode=0)
-        // int c = i; // child
-        // int p = parent[i];
-        // long longest = adjMatrix[c][p];
-        // while (p != -1) {
-        //     //cout << "i = " << i << " c = " << c << "\n";
-        //     longest = max(longest, adjMatrix[c][p]); // find the largest edge weight
-        //     c = p; p = parent[p]; // shift up
-        // }
-        // betaVector[root] = longest;
-        // betaVector[i] = 0;
-        // betaVector[parent[i]] = adjMatrix[i][parent[i]];
-        // for (const auto &child : mst[i]) {
-        //     betaVector[child] = adjMatrix[i][child];
-        // }
-        // // now compute alpha(i, j) in topo order
-        // for (int j : topoList) {
-        //     if (betaVector[j] != -1) { continue; } // already initialized
-        //     betaVector[j] = max(betaVector[parent[j]], adjMatrix[j][parent[j]]); // either discard same edge as parent, or discard edge between parent and self            
-        // } // todo: can optimize because matrix is symmetric
-
-        // cout << "betavector for i = " << i << "\n";
-        // for (auto x : betaVector) { cout << x << ", ";}
-        // cout << "\n";
-
-        // // copy over to alpha matrix
-        // for (int j = 0; j < V; ++j) {
-        //     alphaMatrix[i][j] = alphaMatrix[j][i] = adjMatrix[i][j] - betaVector[j];
-        // }        
+        } 
     }
-
-    cout << "betaMatrix\n";
-    cout << betaMatrix << "\n";
-
-    cout << "alphaMatrix\n";
-    cout << alphaMatrix << "\n";
-
     return alphaMatrix;
 }
 
@@ -336,9 +306,9 @@ Matrix<long> createDistanceMatrix(istream& in) {
  * @return d.rows() x K matrix where element i,j is the j:th nearest
  *         neighbor of city i.
  */
-Matrix<int> createNeighborsMatrix(const Matrix<long>& d, size_t K) {
-    size_t N = d.rows();
-    size_t M = d.cols() - 1;
+Matrix<int> createNeighborsMatrix(const Matrix<long>& alphaMatrix, size_t K) {
+    size_t N = alphaMatrix.rows();
+    size_t M = alphaMatrix.cols() - 1; // node is not neighbor of itself
     K = min(M, K);
     Matrix<int> neighbor(N, K);
     vector<int> row(M); // For sorting.
@@ -352,7 +322,7 @@ Matrix<int> createNeighborsMatrix(const Matrix<long>& d, size_t K) {
         // Sort K first elements in row by distance to i.
         partial_sort(row.begin(), row.begin() + K, row.end(),
             [&](int j, int k) {
-                return d[i][j] < d[i][k];
+                return alphaMatrix[i][j] < alphaMatrix[i][k];
             }
         );
         // Copy first K elements (now sorted) to neighbor matrix.
@@ -387,6 +357,112 @@ inline vector<int> greedy(const Matrix<long>& d) {
         used[k] = true;
     }
     return tour;
+}
+
+// returns predecessor of t1 in the tour
+inline int pred(vector<int> &tour, vector<int> &position, int &t1) {
+    int N = tour.size();
+    return tour[(position[t1] - 1 + N) % N];
+}
+// returns successor of t1 in the tour
+inline int succ(vector<int> &tour, vector<int> &position, int &t1) {
+    int N = tour.size();
+    return tour[(position[t1] + 1) % N];
+}
+
+// returns whether t1 and t2 are adjacent in the tour
+inline bool isAdjacent(vector<int> &tour, vector<int> &position, int t1, int t2) {
+    return (pred(tour, position, t1) == t2 || succ(tour, position, t1) == t2);
+}
+
+// re-order the tour...
+// desc is a list of tuples, <startPos, endPos, dir> where dir = 1 or -1
+void reOrder(vector<int>& tour, vector<int> &position, vector<tuple<int, int, int>> desc) {
+    int N = tour.size();
+    vector<int> newTour;
+    for (const auto &tup : desc) {
+        auto [startPos, endPos, dir] = tup; // start from u, go in direction dir, until hit v
+        assert(dir == 1 || dir == -1);
+        int pos = startPos;
+        while (startPos != endPos) {
+            newTour.push_back(tour[pos]);
+            pos = (pos + tour.size() + dir) % tour.size();
+        }
+        newTour.push_back(tour[pos]); // endPos included
+    }
+    assert(newTour.size() == N);
+    tour.clear();
+    tour.reserve(N);
+    copy(newTour.begin(), newTour.end(), back_inserter(tour)); // copy newTour back to tour
+}
+
+// makes two opt move on edges u->v and w->z (note the direction)
+void makeTwoOptMove(vector<int>& tour, vector<int> &position, int u, int v, int w, int z) {
+    int N = tour.size();
+    int v_i = position[v];
+    int w_i = position[w];
+    //   --u w--        --u-w->
+    //      X     ===>
+    //   <-z v->        <-z-v--
+    reverse(tour, v_i, w_i, position); // implicitly deletes and adds edges
+}
+
+// makes two opt move on edges u->v and w->z (note the direction)
+void makeThreeOptMove(vector<int>& tour, vector<int> &position, int t1, int t2, int t3, int t4, int t5, int t6) {
+    int N = tour.size();
+    int t1_i = position[t1_i];
+    int t2_i = position[t2_i];
+    int t3_i = position[t3_i];
+    int t4_i = position[t4_i];
+    int t5_i = position[t5_i];
+    int t6_i = position[t6_i];
+    //   --u w--        --u-w->
+    //      X     ===>
+    //   <-z v->        <-z-v--
+    // todo:
+}
+
+// the 5-opt move described in LKH paper
+// gain = 
+inline bool FiveOpt(vector<int>& tour, vector<int> &position, const Matrix<long>& d, const Matrix<int>& neighborMatrix,
+        int t1, int t2, long long g0) { // t1 and t2 is the first edge (of current tour) chosen
+    long long gain = g0;
+    long long g1, g2;
+    int t3, t4;
+    int numNbrs = neighborMatrix.cols();
+    for (int i = 0; i < numNbrs; ++i) {
+        t3 = neighborMatrix[t2][i];
+        if (isAdjacent(tour, position, t2, t3) || (gain - d[t2][t3] <= 0)) { // if t2-t3 is already in tour or if this leads to negative gain
+            continue; // try next neighbor
+        }
+        gain -= d[t2][t3]; // pick a t3
+        for (int X4 = 1; X4 <= 2; ++X4) { // 2 possibilities for t4
+            t4 = (X4 == 1 ? pred(tour, position, t3) : succ(tour, position, t3));
+            gain += d[t3][t4]; // pick a t4
+            if (X4 == 1 && (gain - d[t4][t1]) > 0) { // this is a improving 2-opt move
+                makeTwoOptMove(tour, position, t1, t2, t4, t3);
+                return true;
+            }
+        }
+        // now pick t5 and t6
+        int t5, t6;
+        for (int i = 0; i < numNbrs; ++i) {
+            t5 = neighborMatrix[t4][i]; // t5 is neighbor of t4
+            if (isAdjacent(tour, position, t4, t5) || (gain - d[t4][t5] <= 0)) { // if t2-t3 is already in tour or if this leads to negative gain
+                continue; // try next neighbor
+            }
+            gain -= d[t4][t5]; // pick a t5
+            for (int X6 = 1; X6 <= 2; ++X6) { // 2 possibilities for t6
+                t6 = (X6 == 1 ? pred(tour, position, t5) : succ(tour, position, t5));
+                gain += d[t5][t6]; // pick a t6
+                if (X6 == 1 && (gain - d[t6][t1]) > 0) { // this is a improving 3-opt move
+                    makeThreeOptMove(tour, position, t1, t2, t4, t3, t6, t5);
+                    return true;
+                }
+            }
+            // now pick t7 and t8
+        }
+    }
 }
 
 /**
@@ -626,7 +702,8 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     auto threeOptDeadline = deadline - fifty_ms;
 
     // Calculate distance / K-nearest neighbors matrix.
-    const Matrix<int> neighbor = createNeighborsMatrix(d, MAX_K);
+    Matrix<long> alphaMatrix = createAlphaMatrix(d);
+    const Matrix<int> neighbor = createNeighborsMatrix(alphaMatrix, MAX_K);
     const long min = minDistance(d); // Shortest distance.
     const size_t N = d.rows();           // Number of cities.
 
@@ -710,9 +787,6 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
 int main(int argc, char *argv[]) {
     // create dist matrix
     Matrix<long> d = createDistanceMatrix(cin);
-    cout << d << "\n";
-    Matrix<long> alphaMatrix = createAlphaMatrix(d);
-    cout << alphaMatrix << "\n";
 
     // Approximate/print a TSP tour in ~1950 milliseconds.
     vector<int> st = approximate(d, now() + chrono::milliseconds(1950));
@@ -726,5 +800,27 @@ int main(int argc, char *argv[]) {
     cout << "length: " << stLength << "\n";
     cout << "Percent above OPT: " << (static_cast<double>(stLength) / optLength * 100) << "\n\n";
 
+    // test tour class
+    Tour t;
+    for (int n = 0; n < 10; ++n) {
+        t.addNode(n);
+    }
+    t.print();
+
+    vector<tuple<int, int, int>> desc;
+    desc.push_back({0, 3, 1});
+    desc.push_back({9, 8, -1});
+    desc.push_back({4, 4, 1});
+    desc.push_back({5, 7, 1});
+
+    t.reOrderByPosition(desc);
+    t.print();
+    t.reOrderByPosition(desc);
+    t.print();
+
+    vector<int> xs{7, 3, 4, 2, 5};
+    vector<int> sorted = t.getSortedOrder(xs);
+
+    printVec(sorted);
     return 0;
 }

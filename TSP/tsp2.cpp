@@ -25,6 +25,7 @@ default_random_engine rng(rd());
 
 // Size of nearest neighbors matrix.
 const static size_t MAX_K = 20;
+const static int NUM_DOUBLE_BRIDGE_BEFORE_LOCAL_SHUFFLE = 7;
 
 // ---------------- Helper functions -------------------------------------------------
 
@@ -435,6 +436,70 @@ inline void twoOpt(vector<int>& tour, const Matrix<long>& d,
     }
 }
 
+inline void twoHOpt(vector<int>& tour, const Matrix<long>& d,
+        const Matrix<int>& neighbor, vector<int> &position,
+        long& max, long min) {
+    size_t N = d.rows(); // Number of cities.
+
+    // Candidate edges uv, wz and their positions in tour.
+    int A, pA, sA, B, pB, sB; // pA = pred(A), sA = succ(A)
+    int A_i, pA_i, sA_i, B_i, pB_i, sB_i;
+    
+    bool locallyOptimal = false;
+    while (!locallyOptimal) {
+        locallyOptimal = true;
+
+        // For each node A
+        for (A_i = 0; A_i < N; ++A_i) {
+            pA_i = (A_i + N - 1) % N;
+            sA_i = (A_i + 1) % N;
+            A = tour[A_i];
+            pA = tour[pA_i]; 
+            sA = tour[sA_i];
+
+            // For each node B that is 'near' A
+            for (size_t k = 0; k < neighbor.cols(); ++k) {
+                B_i = position[neighbor[A][k]];
+                pB_i = (B_i + N - 1) % N;
+                sB_i = (B_i + 1) % N;
+                B = tour[B_i];
+                pB = tour[pB_i];
+                sB = tour[sB_i];
+
+                if (B == sA || B == pA) {
+                    continue; // Skip
+                }
+
+                // pA -> A -> sA and B -> sB
+                // becomes
+                // pA -> sA and B -> A -> sB
+                if (sB != pB &&
+                    (d[pA][sA] + d[B][A] + d[A][sB] - d[pA][A] - d[A][sA] - d[B][sB] < 0)) { // can improve
+                    // make the move
+                    // sB_i to pA_i is fixed, no change
+                    // shift sA onwards, back 1 step, until we shift B.
+                    int cur = (pA_i + 1) % N;
+                    int next;
+                    while (cur != B_i) { // pos is at A_i now
+                        //cout << cur << "\n";
+                        next = (cur + 1) % N;
+                        tour[cur] = tour[next];
+                        position[tour[cur]] = cur;
+                        cur = next;
+                    }
+                    tour[cur] = A;
+                    position[A] = cur;
+                    // update
+                    max = maximum(max, d[pA][sA], d[B][A]);
+                    max = maximum(max, max, d[A][sB]);
+                    locallyOptimal = false;
+                    break;
+                }
+            }
+        }
+    }
+}
+
 /**
  * Optimizes the given tour using 3-opt.
  *
@@ -593,6 +658,23 @@ inline vector<int> doubleBridge(const vector<int>& tour) {
     return newTour;
 }
 
+// shuffles subtours
+inline vector<int> localShuffle(const vector<int>& tour) {
+    const int N = tour.size();
+    size_t subTourSize = N / 8;
+    vector<int> newTour;
+    newTour.reserve(N);
+    copy(tour.begin(), tour.end(), back_inserter(newTour));
+
+    // shuffle newTour
+    uniform_int_distribution<size_t> randomOffset(1, N / 2);
+    size_t A = randomOffset(rng);
+    shuffle(newTour.begin() + A, newTour.begin() + A + subTourSize, rng);
+
+    return newTour;
+}
+
+
 /**
  * Approximates optimal TSP tour through graph read from the given input stream.
  *
@@ -632,6 +714,7 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     long max = 0;
     for (int i = 0; i < N; ++i) {
         max = std::max(max, d[i][(i + 1) % N]); // Maximum distance in tour.
+        // max = std::max(max, d[tour[i]][tour[(i + 1) % N]]); // is there a bug here?  i think this is the correct one
         position[tour[i]] = i;                  // tour[i] is i:th city in tour.
     }
 
@@ -658,13 +741,25 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
 
     vector<int> shortestTour = tour;          // Best tour found.
     long long shortestTourLength = length(tour, d); // Length of best tour found.
+    int numDB = 0;
+    int numShuffles = 0;
+    int numFail = 0;
 
     for (i = 0; (now() + std::max(fifty_ms, 2 * averageTime)) < deadline; ++i) {
         auto start = now();
 
         if (N >= 8) {
-            // Perform random 4-opt "double bridge" move.
-            tour = doubleBridge(tour);
+            if (numFail > NUM_DOUBLE_BRIDGE_BEFORE_LOCAL_SHUFFLE) {
+                // do local reshuffle
+                tour = localShuffle(tour);
+                numShuffles++;
+                cout << "Shuffling at DB = " << numDB << "\n";
+                numFail = 0;
+            } else {
+                // do double bridge move.
+                tour = doubleBridge(tour);
+                numDB++;
+            }
         } else {
             // Tiny tour, so just shuffle it instead.
             shuffle(tour.begin(), tour.end(), rng);
@@ -679,13 +774,19 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
 
         // Optimize tour with 2-opt + 3-opt.
         twoOpt(tour, d, neighbor, position, max, min);
+        twoHOpt(tour, d, neighbor, position, max, min);
         threeOpt(tour, d, neighbor, position, max, min, threeOptDeadline);
 
+        // compare with best tour
         long long tourLength = length(tour, d);
         if (tourLength < shortestTourLength) {
             // Shorter tour found.
             shortestTour = tour;
             shortestTourLength = tourLength;
+            cout << "Improvement Found at numDB = " << numDB << "\n";
+            numFail = 0; // reset
+        } else { // unsuccessful double bridge
+            numFail++;
         }
 
         // Collect statistics.
@@ -697,6 +798,14 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     // cout << "iterations: " << i << "\n";
     // cout << "totalTime: " << totalTime << "\n";
     // cout << "averageTime: " << averageTime << "\n";
+    
+    // stats
+    long long stLength = length(shortestTour, d);
+    long long optLength; cin >> optLength;
+    cout << "length: " << stLength << "\n";
+    cout << "Percent above OPT: " << (static_cast<double>(stLength) / optLength * 100) << "\n";
+    cout << "numDB: " << numDB << "\n";
+    cout << "numShuffles: " << numShuffles << "\n";
 
     return shortestTour;
 }
@@ -713,16 +822,10 @@ int main(int argc, char *argv[]) {
     vector<int> st = approximate(d, now() + chrono::milliseconds(1950));
 
     // print tour
-    for (auto city : st) {
-        cout << city << endl;
-    }
+    // for (auto city : st) {
+    //     cout << city << endl;
+    // }
     // cout << "tour len: " << st.size() << "\n";
-
-    // stats
-    // long long stLength = length(st, d);
-    // long long optLength; cin >> optLength;
-    // cout << "length: " << stLength << "\n";
-    // cout << "Percent above OPT: " << (static_cast<double>(stLength) / optLength * 100) << "\n\n";
 
     return 0;
 }

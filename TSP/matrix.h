@@ -44,7 +44,7 @@ template<typename T>
 std::ostream& operator<<(std::ostream& os, const Matrix<T>& matrix) {
     for (std::size_t i = 0; i < matrix.rows(); ++i) {
         for (std::size_t j = 0; j < matrix.cols(); ++j) {
-            os << std::left << std::setw(3) << matrix[i][j];
+            os << std::left << std::setw(5) << matrix[i][j];
         }
         os << std::endl;
     }

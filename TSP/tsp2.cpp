@@ -164,11 +164,13 @@ typedef vector<int> vi;
 typedef vector<ii> vii;
 
 
-// compute alpha values for the graph given
-// it will use prims to create the V-tree (where the special node is V-1)
+/* compute alpha values for the graph given
+ * it will use prims to create the V-tree (where the special node is V-1)
+ * Implementation is correct, but without subgradient optimization, no significant improvement to score
+ */
 Matrix<long> createAlphaMatrix(Matrix<long> &adjMatrix) { // adjMatrix is square
-    vi parent; // store predecessor of nodes in mst
-    vi taken; // nodes in the partial mst
+    vector<int> parent; // store predecessor of nodes in mst
+    vector<int> taken; // nodes in the partial mst
     priority_queue<tuple<int, int, int>> pq;  // priority_queue is a max heap, we use -ve sign to reverse order
     vector<vector<int>> mst; // adjList of mst, it is a DAG
     vector<int> topoList; // store topo order of mst
@@ -285,9 +287,9 @@ Matrix<long> createDistanceMatrix(istream& in) {
  * @return d.rows() x K matrix where element i,j is the j:th nearest
  *         neighbor of city i.
  */
-Matrix<int> createNeighborsMatrix(const Matrix<long>& alphaMatrix, size_t K) {
-    size_t N = alphaMatrix.rows();
-    size_t M = alphaMatrix.cols() - 1; // node is not neighbor of itself
+Matrix<int> createNeighborsMatrix(const Matrix<long>& d, size_t K) {
+    size_t N = d.rows();
+    size_t M = d.cols() - 1; // node is not neighbor of itself
     K = min(M, K);
     Matrix<int> neighbor(N, K);
     vector<int> row(M); // For sorting.
@@ -301,7 +303,7 @@ Matrix<int> createNeighborsMatrix(const Matrix<long>& alphaMatrix, size_t K) {
         // Sort K first elements in row by distance to i.
         partial_sort(row.begin(), row.begin() + K, row.end(),
             [&](int j, int k) {
-                return alphaMatrix[i][j] < alphaMatrix[i][k];
+                return d[i][j] < d[i][k];
             }
         );
         // Copy first K elements (now sorted) to neighbor matrix.
@@ -611,11 +613,16 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     chrono::milliseconds fifty_ms(50);
     auto threeOptDeadline = deadline - fifty_ms;
 
+    const long min = minDistance(d); // Shortest distance.
+    const size_t N = d.rows();           // Number of cities.
+
+    if (N == 1) { // test case 7 is a single city
+        return vector<int>({0});
+    }
+
     // Calculate distance / K-nearest neighbors matrix.
     // Matrix<long> alphaMatrix = createAlphaMatrix(d);
     const Matrix<int> neighbor = createNeighborsMatrix(d, MAX_K);
-    const long min = minDistance(d); // Shortest distance.
-    const size_t N = d.rows();           // Number of cities.
 
     // Generate initial greedy tour.
     vector<int> tour = greedy(d);
@@ -698,20 +705,24 @@ int main(int argc, char *argv[]) {
     // create dist matrix
     Matrix<long> d = createDistanceMatrix(cin);
 
+    // Matrix<long> alpha = createAlphaMatrix(d);
+    // cout << "alpha\n";
+    // cout << alpha;
+
     // Approximate/print a TSP tour in ~1950 milliseconds.
     vector<int> st = approximate(d, now() + chrono::milliseconds(1950));
 
     // print tour
-    // for (auto city : st) {
-    //     cout << city << endl;
-    // }
+    for (auto city : st) {
+        cout << city << endl;
+    }
     // cout << "tour len: " << st.size() << "\n";
 
     // stats
-    long long stLength = length(st, d);
-    long long optLength; cin >> optLength;
-    cout << "length: " << stLength << "\n";
-    cout << "Percent above OPT: " << (static_cast<double>(stLength) / optLength * 100) << "\n\n";
+    // long long stLength = length(st, d);
+    // long long optLength; cin >> optLength;
+    // cout << "length: " << stLength << "\n";
+    // cout << "Percent above OPT: " << (static_cast<double>(stLength) / optLength * 100) << "\n\n";
 
     return 0;
 }

@@ -577,10 +577,15 @@ int main(int argc, char *argv[]) {
         // cout << city << endl;
     }
 
+    //change this for human-readable description
+    bool showDescription = false;
     uint64_t stLength = length(st, d);
     uint64_t optLength; cin >> optLength;
-    cout << "length: " << stLength << "\n";
-    cout << "Percent above OPT: " << (static_cast<double>(stLength) / optLength * 100) << "\n\n";
-
+    if (showDescription) {
+        cout << "length: " << stLength << "\n";
+        cout << "Percent above OPT: " << (static_cast<double>(stLength) / optLength * 100) << "\n\n";
+    } else {
+        cout << stLength << " " << optLength;
+    }
     return 0;
 }

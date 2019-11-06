@@ -33,6 +33,17 @@ void printVec(vector<int> v) {
     for (const auto& n : v) {
         std::cout << n << ", ";
     }
+    cout << "\n";
+}
+
+void printVecVec(vector<vector<int>> adjList) {
+    for (int i = 0; i < adjList.size(); ++i) {
+        cout << i << ": [";
+        for (const auto& x : adjList[i]) {
+            cout << x << ", ";
+        }
+        cout << "]\n";
+    }
 }
 
 // Return the current time.
@@ -338,6 +349,91 @@ inline vector<int> greedy(const Matrix<long>& d) {
         tour[i] = k;
         used[k] = true;
     }
+    return tour;
+}
+
+// algorithm for initial tour
+// greedily chooses the shortest edges first to construct a tour
+// O(N^2 log N)
+// there is a faster version, but I dont think it will help much
+vector<int> multiFragSlow(const Matrix<long>& d) {
+    int N = d.rows();
+    if (N == 1) {
+        return {0};
+    }
+
+    int numEdgesTaken = 0; // num edges taken, stop when equal N-1
+
+    vector<int> degrees; degrees.assign(N, 0); // degree[i] = degree of node i
+    vector<int> tail; tail.resize(N);  // stores the other end of a fragment. e.g. if the fragment is u - .... - v, then tail[u] = v and tail[v] = u
+    for (int i = 0; i < tail.size(); ++i) {
+        tail[i] = i; // initially, you are your own tail
+    }
+    
+    vector<vector<int>> adjList; adjList.resize(N); // we will construct this graph
+    priority_queue<tuple<int, int, int>> pq; // (-weight, u, v) Note that pq is max heap so must negate weight
+
+    for (int i = 0; i < N; ++i) {
+        for (int j = i + 1; j < N; ++j) {
+            pq.emplace(-1 * d[i][j], i, j);
+        }
+    }
+    while (!pq.empty()) {
+        auto [w, u, v] = pq.top(); pq.pop();
+        w = -w; // negate back the weight
+        // cout << w << ", " << u << ", " << v << "\n";
+        
+        if (degrees[u] >= 2 || degrees[v] >= 2) { // already part of a path
+            continue; // can't use this edge
+        }
+        if (tail[u] == v) { // will form a cycle
+            continue;
+        }
+        
+        // connect u and v, and update their tails
+        // tail[u] ---- u --- v ----- tail[v]
+        adjList[u].push_back(v);
+        adjList[v].push_back(u);
+
+        int tv = tail[v]; // temp variables are needed
+        int tu = tail[u];
+        tail[tu] = tv;
+        tail[tv] = tu;
+        degrees[u]++;
+        degrees[v]++;
+        numEdgesTaken++;
+
+        if (numEdgesTaken == N - 1) break;
+    }
+
+    // make a tour and return
+
+    // find one end of the tour
+    int start = 0;
+    for (int i = 0; i < adjList.size(); ++i) {
+        if (adjList[i].size() == 1) {
+            start = i;
+            break;
+        }
+    }
+    
+    vector<bool> taken; taken.assign(N, false);
+    taken[start] = true;
+    vector<int> tour; tour.push_back(start);
+    int cur = adjList[start][0];
+    while (tour.size() < N - 1) {
+        taken[cur] = true;
+        tour.push_back(cur);
+        assert(adjList[cur].size() == 2);
+        // we find the next node in the tour
+        if (taken[adjList[cur][0]]) { // not this one
+            cur = adjList[cur][1];
+        } else {
+            cur = adjList[cur][0];
+        }
+    }
+    tour.push_back(cur);
+
     return tour;
 }
 
@@ -706,8 +802,9 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     // Matrix<long> alphaMatrix = createAlphaMatrix(d);
     const Matrix<int> neighbor = createNeighborsMatrix(d, MAX_K);
 
-    // Generate initial greedy tour.
-    vector<int> tour = greedy(d);
+    // Generate initial greedy or MF tour.
+    // vector<int> tour = greedy(d);
+    vector<int> tour = multiFragSlow(d);
 
     // Create max / position for initial 2-opt + 3-opt.
     vector<int> position(N);
@@ -753,7 +850,7 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
                 // do local reshuffle
                 tour = localShuffle(tour);
                 numShuffles++;
-                cout << "Shuffling at DB = " << numDB << "\n";
+                // cout << "Shuffling at DB = " << numDB << "\n";
                 numFail = 0;
             } else {
                 // do double bridge move.
@@ -783,7 +880,7 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
             // Shorter tour found.
             shortestTour = tour;
             shortestTourLength = tourLength;
-            cout << "Improvement Found at numDB = " << numDB << "\n";
+            // cout << "Improvement Found at numDB = " << numDB << "\n";
             numFail = 0; // reset
         } else { // unsuccessful double bridge
             numFail++;
@@ -802,6 +899,7 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     // stats
     long long stLength = length(shortestTour, d);
     long long optLength; cin >> optLength;
+    cout << "numCities: " << shortestTour.size() << "\n";
     cout << "length: " << stLength << "\n";
     cout << "Percent above OPT: " << (static_cast<double>(stLength) / optLength * 100) << "\n";
     cout << "numDB: " << numDB << "\n";

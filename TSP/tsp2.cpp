@@ -32,7 +32,7 @@ default_random_engine rng(rd());
 
 // Size of nearest neighbors matrix.
 const static size_t MAX_K = 20;
-const static int NUM_DOUBLE_BRIDGE_BEFORE_LOCAL_SHUFFLE = 7;
+const static int NUM_DOUBLE_BRIDGE_BEFORE_LOCAL_SHUFFLE = 10;
 const static int THREE_OPT_BUFFER_TIME = 50;
 const static int EXECUTION_DURATION = 1950; // time for the whole algo
 const static int GEO_SHUFFLE_WIDTH = 10;
@@ -704,7 +704,7 @@ inline void threeOptFast(vector<int>& tour, const Matrix<long>& d,
         const Matrix<int>& neighbor, vector<int> &position,
         long& max, long min) {
     int N = tour.size();
-    int WIDTH = 40; // search width N/4 is pretty good already
+    int WIDTH = 10; // search width N/4 is pretty good already
 
     int A, B, C, D, E, F;
     int A_i, B_i, C_i, D_i, E_i, F_i;
@@ -1006,9 +1006,7 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
         return vector<int>({0});
     }
 
-    // Calculate distance / K-nearest neighbors matrix.
-    // Matrix<long> alphaMatrix = createAlphaMatrix(d);
-    const Matrix<int> neighbor = createNeighborsMatrix(d, MAX_K);
+    const Matrix<int> neighbor = createNeighborsMatrix(d, MAX_K); // nearest neighbor matrix
 
     // Generate initial tour. greedy/multiFrag/twoApprox
     // vector<int> tour = greedy(d);
@@ -1023,11 +1021,10 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
         position[tour[i]] = i;                  // tour[i] is i:th city in tour.
     }
 
-    // Optimize tour with 2-opt + 3-opt.
-    // twoOpt(tour, d, neighbor, position, max, min);
-    // twoHOpt(tour, d, neighbor, position, max, min);
-    threeOptFast(tour, d, neighbor, position, max, min);
-    // threeOpt(tour, d, neighbor, position, max, min, threeOptDeadline);
+    // Local optimization
+    twoOpt(tour, d, neighbor, position, max, min);
+    twoHOpt(tour, d, neighbor, position, max, min);
+    threeOpt(tour, d, neighbor, position, max, min, threeOptDeadline);
 
     /*
      * Main loop.
@@ -1057,7 +1054,8 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
             shuffle(tour.begin(), tour.end(), rng); // Tiny tour, so just shuffle it instead.
         } else {
             if (numFailSinceLastShuffle > NUM_DOUBLE_BRIDGE_BEFORE_LOCAL_SHUFFLE) {
-                tour = localShuffle(tour); // do local reshuffle
+                // tour = localShuffle(tour); // do local reshuffle
+                geoKShuffle(tour, position);
                 numShuffles++;
                 // cout << "Shuffling at DB = " << numDB << "\n";
                 numFailSinceLastShuffle = 0;
@@ -1080,7 +1078,7 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
         twoHOpt(tour, d, neighbor, position, max, min);
         threeOptFast(tour, d, neighbor, position, max, min);
         // threeOpt(tour, d, neighbor, position, max, min, threeOptDeadline);
-
+        
         // compare with best tour
         long long tourLength = length(tour, d);
         if (tourLength < shortestTourLength) {
@@ -1104,45 +1102,52 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     // cout << "averageTime: " << averageTime << "\n";
     
     // stats
-    long long stLength = length(shortestTour, d);
-    long long optLength; cin >> optLength;
-    cout << "numCities: " << shortestTour.size() << "\n";
-    cout << "length: " << stLength << "\n";
-    cout << "Percent above OPT: " << (static_cast<double>(stLength) / optLength * 100) << "\n";
-    cout << "numDB: " << numDB << "\n";
-    cout << "numShuffles: " << numShuffles << "\n";
+    // long long stLength = length(shortestTour, d);
+    // long long optLength; cin >> optLength;
+    // cout << "numCities: " << shortestTour.size() << "\n";
+    // cout << "length: " << stLength << "\n";
+    // cout << "Percent above OPT: " << (static_cast<double>(stLength) / optLength * 100) << "\n";
+    // cout << "numDB: " << numDB << "\n";
+    // cout << "numShuffles: " << numShuffles << "\n";
 
     return shortestTour;
 }
 
 int main(int argc, char *argv[]) {
-    // create dist matrix
+
     Matrix<long> d = createDistanceMatrix(cin);
 
-    // Matrix<long> alpha = createAlphaMatrix(d);
-    // cout << "alpha\n";
-    // cout << alpha;
-
     // Approximate/print a TSP tour in EXECUTION_DURATION milliseconds.
-    // vector<int> st = approximate(d, now() + chrono::milliseconds(EXECUTION_DURATION));
+    vector<int> st = approximate(d, now() + chrono::milliseconds(EXECUTION_DURATION));
 
     // print tour
-    // for (auto city : st) {
-    //     cout << city << endl;
+    for (auto city : st) {
+        cout << city << endl;
+    }
+    //cout << "tour len: " << st.size() << "\n";
+
+    // for test.py
+    // bool showDescription = true;
+    // uint64_t stLength = length(st, d);
+    // uint64_t optLength; cin >> optLength;
+    // if (showDescription) {
+    //     cout << "length: " << stLength << "\n";
+    //     cout << "Percent above OPT: " << (static_cast<double>(stLength) / optLength * 100) << "\n\n";
+    // } else {
+    //     cout << stLength << " " << optLength;
     // }
-    // cout << "tour len: " << st.size() << "\n";
 
-    const Matrix<int> neighbor = createNeighborsMatrix(d, MAX_K);
-    vector<int> t1 = twoApprox(d);
-    vector<int> t2 = t1;
-    vector<int> p1 = getPositionVec(t1);
-    vector<int> p2 = getPositionVec(t2);
-    long mx1 = getMaxWeight(t1, d);
-    long mx2 = getMaxWeight(t2, d);
-    long mi1 = minDistance(d);
-    long mi2 = minDistance(d);
+    // const Matrix<int> neighbor = createNeighborsMatrix(d, MAX_K);
+    // vector<int> t1 = twoApprox(d);
+    // vector<int> t2 = t1;
+    // vector<int> p1 = getPositionVec(t1);
+    // vector<int> p2 = getPositionVec(t2);
+    // long mx1 = getMaxWeight(t1, d);
+    // long mx2 = getMaxWeight(t2, d);
+    // long mi1 = minDistance(d);
+    // long mi2 = minDistance(d);
 
-    auto dl = now() + chrono::milliseconds(EXECUTION_DURATION);
+    // auto dl = now() + chrono::milliseconds(EXECUTION_DURATION);
     
     // cout << "initial len t1: " << length(t1, d) << "\n";
     // threeOpt(t1, d, neighbor, p1, mx1, mi1, dl);
@@ -1159,19 +1164,19 @@ int main(int argc, char *argv[]) {
     // checkConsistent(t2, p2);
 
     // testing
-    vector<int> t;
-    for (int i = 0; i < d.rows(); ++i) {
-        t.push_back(i);
-    }
-    vector<int> position; position.resize(t.size());
-    for (int i = 0; i < t.size(); ++i) {
-        position[t[i]] = i;
-    }
+    // vector<int> t;
+    // for (int i = 0; i < d.rows(); ++i) {
+    //     t.push_back(i);
+    // }
+    // vector<int> position; position.resize(t.size());
+    // for (int i = 0; i < t.size(); ++i) {
+    //     position[t[i]] = i;
+    // }
 
-    printTourAndPos(t, position);
-    geoKShuffle(t, position);
-    checkConsistent(t, position);
-    printTourAndPos(t, position);
+    // printTourAndPos(t, position);
+    // geoKShuffle(t, position);
+    // checkConsistent(t, position);
+    // printTourAndPos(t, position);
 
     return 0;
 }

@@ -7,6 +7,7 @@
 #include <random>
 #include <stack>
 #include <queue>
+#include <cassert>
 
 #include "matrix.h"
 
@@ -25,27 +26,13 @@ default_random_engine rng(rd());
 // Size of nearest neighbors matrix.
 const static size_t MAX_K = 20;
 
-void toposortHelper(int u, vector<vector<int>> &adjList, vector<int> &dfs_num, vector<int> &ts) {
-    dfs_num[u] = 1; // visited
-    for (auto v : adjList[u]) {
-        if (dfs_num[v] == 0)
-            toposortHelper(v, adjList, dfs_num, ts);
-    }
-    ts.push_back(u);
-}
-
-vector<int> toposort(vector<vector<int>> &adjList) {
-    vector<int> dfs_num; dfs_num.assign(adjList.size(), 0);
-    vector<int> ts; ts.clear();
-    for (int u = 0; u < adjList.size(); ++u) {
-        if (dfs_num[u] == 0)
-            toposortHelper(u, adjList, dfs_num, ts);
-    }
-    reverse(ts.begin(), ts.end()); // reverse ts
-    return ts;
-}
-
 // ---------------- Helper functions -------------------------------------------------
+
+void printVec(vector<int> v) {
+    for (const auto& n : v) {
+        std::cout << n << ", ";
+    }
+}
 
 // Return the current time.
 static inline chrono::time_point<chrono::high_resolution_clock> now() {
@@ -259,46 +246,8 @@ Matrix<long> createAlphaMatrix(Matrix<long> &adjMatrix) { // adjMatrix is square
             int v = topoList[j];
             betaMatrix[u][v] = betaMatrix[v][u] = max(betaMatrix[u][parent[v]], adjMatrix[v][parent[v]]);
             alphaMatrix[u][v] = alphaMatrix[v][u] = adjMatrix[u][v] - betaMatrix[u][v]; 
-        }
-        // alphaMatrix[i][i] = -1;
-        // vector<long> betaVector; betaVector.clear(); betaVector.assign(V, -1);
-        // // first compute alpha(i, firstNode=0)
-        // int c = i; // child
-        // int p = parent[i];
-        // long longest = adjMatrix[c][p];
-        // while (p != -1) {
-        //     //cout << "i = " << i << " c = " << c << "\n";
-        //     longest = max(longest, adjMatrix[c][p]); // find the largest edge weight
-        //     c = p; p = parent[p]; // shift up
-        // }
-        // betaVector[root] = longest;
-        // betaVector[i] = 0;
-        // betaVector[parent[i]] = adjMatrix[i][parent[i]];
-        // for (const auto &child : mst[i]) {
-        //     betaVector[child] = adjMatrix[i][child];
-        // }
-        // // now compute alpha(i, j) in topo order
-        // for (int j : topoList) {
-        //     if (betaVector[j] != -1) { continue; } // already initialized
-        //     betaVector[j] = max(betaVector[parent[j]], adjMatrix[j][parent[j]]); // either discard same edge as parent, or discard edge between parent and self            
-        // } // todo: can optimize because matrix is symmetric
-
-        // cout << "betavector for i = " << i << "\n";
-        // for (auto x : betaVector) { cout << x << ", ";}
-        // cout << "\n";
-
-        // // copy over to alpha matrix
-        // for (int j = 0; j < V; ++j) {
-        //     alphaMatrix[i][j] = alphaMatrix[j][i] = adjMatrix[i][j] - betaVector[j];
-        // }        
+        } 
     }
-
-    cout << "betaMatrix\n";
-    cout << betaMatrix << "\n";
-
-    cout << "alphaMatrix\n";
-    cout << alphaMatrix << "\n";
-
     return alphaMatrix;
 }
 
@@ -336,9 +285,9 @@ Matrix<long> createDistanceMatrix(istream& in) {
  * @return d.rows() x K matrix where element i,j is the j:th nearest
  *         neighbor of city i.
  */
-Matrix<int> createNeighborsMatrix(const Matrix<long>& d, size_t K) {
-    size_t N = d.rows();
-    size_t M = d.cols() - 1;
+Matrix<int> createNeighborsMatrix(const Matrix<long>& alphaMatrix, size_t K) {
+    size_t N = alphaMatrix.rows();
+    size_t M = alphaMatrix.cols() - 1; // node is not neighbor of itself
     K = min(M, K);
     Matrix<int> neighbor(N, K);
     vector<int> row(M); // For sorting.
@@ -352,7 +301,7 @@ Matrix<int> createNeighborsMatrix(const Matrix<long>& d, size_t K) {
         // Sort K first elements in row by distance to i.
         partial_sort(row.begin(), row.begin() + K, row.end(),
             [&](int j, int k) {
-                return d[i][j] < d[i][k];
+                return alphaMatrix[i][j] < alphaMatrix[i][k];
             }
         );
         // Copy first K elements (now sorted) to neighbor matrix.
@@ -387,6 +336,43 @@ inline vector<int> greedy(const Matrix<long>& d) {
         used[k] = true;
     }
     return tour;
+}
+
+// returns predecessor of t1 in the tour
+inline int pred(vector<int> &tour, vector<int> &position, int &t1) {
+    int N = tour.size();
+    return tour[(position[t1] - 1 + N) % N];
+}
+// returns successor of t1 in the tour
+inline int succ(vector<int> &tour, vector<int> &position, int &t1) {
+    int N = tour.size();
+    return tour[(position[t1] + 1) % N];
+}
+
+// returns whether t1 and t2 are adjacent in the tour
+inline bool isAdjacent(vector<int> &tour, vector<int> &position, int t1, int t2) {
+    return (pred(tour, position, t1) == t2 || succ(tour, position, t1) == t2);
+}
+
+// re-order the tour...
+// desc is a list of tuples, <startPos, endPos, dir> where dir = 1 or -1
+void reOrder(vector<int>& tour, vector<int> &position, vector<tuple<int, int, int>> desc) {
+    int N = tour.size();
+    vector<int> newTour;
+    for (const auto &tup : desc) {
+        auto [startPos, endPos, dir] = tup; // start from u, go in direction dir, until hit v
+        assert(dir == 1 || dir == -1);
+        int pos = startPos;
+        while (startPos != endPos) {
+            newTour.push_back(tour[pos]);
+            pos = (pos + tour.size() + dir) % tour.size();
+        }
+        newTour.push_back(tour[pos]); // endPos included
+    }
+    assert(newTour.size() == N);
+    tour.clear();
+    tour.reserve(N);
+    copy(newTour.begin(), newTour.end(), back_inserter(tour)); // copy newTour back to tour
 }
 
 /**
@@ -626,6 +612,7 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     auto threeOptDeadline = deadline - fifty_ms;
 
     // Calculate distance / K-nearest neighbors matrix.
+    // Matrix<long> alphaMatrix = createAlphaMatrix(d);
     const Matrix<int> neighbor = createNeighborsMatrix(d, MAX_K);
     const long min = minDistance(d); // Shortest distance.
     const size_t N = d.rows();           // Number of cities.
@@ -699,10 +686,10 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
         averageTime = totalTime / (i + 1);
     }
 
-    //cout << "Main Loop Statistics\n";
-    //cout << "iterations: " << i << "\n";
-    //cout << "totalTime: " << totalTime << "\n";
-    //cout << "averageTime: " << averageTime << "\n";
+    // cout << "Main Loop Statistics\n";
+    // cout << "iterations: " << i << "\n";
+    // cout << "totalTime: " << totalTime << "\n";
+    // cout << "averageTime: " << averageTime << "\n";
 
     return shortestTour;
 }
@@ -710,17 +697,17 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
 int main(int argc, char *argv[]) {
     // create dist matrix
     Matrix<long> d = createDistanceMatrix(cin);
-    cout << d << "\n";
-    Matrix<long> alphaMatrix = createAlphaMatrix(d);
-    cout << alphaMatrix << "\n";
 
     // Approximate/print a TSP tour in ~1950 milliseconds.
     vector<int> st = approximate(d, now() + chrono::milliseconds(1950));
 
-    for (auto city : st) { // print tour
-        // cout << city << endl;
-    }
+    // print tour
+    // for (auto city : st) {
+    //     cout << city << endl;
+    // }
+    // cout << "tour len: " << st.size() << "\n";
 
+    // stats
     long long stLength = length(st, d);
     long long optLength; cin >> optLength;
     cout << "length: " << stLength << "\n";

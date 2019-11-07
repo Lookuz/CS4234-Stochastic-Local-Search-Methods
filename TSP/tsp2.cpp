@@ -35,6 +35,7 @@ const static size_t MAX_K = 20;
 const static int NUM_DOUBLE_BRIDGE_BEFORE_LOCAL_SHUFFLE = 7;
 const static int THREE_OPT_BUFFER_TIME = 50;
 const static int EXECUTION_DURATION = 1950; // time for the whole algo
+const static int GEO_SHUFFLE_WIDTH = 10;
 
 // ---------------- Helper functions -------------------------------------------------
 
@@ -53,6 +54,13 @@ void printVecVec(vector<vector<int>> &adjList) {
         }
         cout << "]\n";
     }
+}
+
+void printTourAndPos(vector<int> &tour, vector<int> &position) {
+    cout << "tour    : ";
+    printVec(tour);
+    cout << "position: ";
+    printVec(position);
 }
 
 vector<int> getPositionVec(vector<int> &tour) {
@@ -944,12 +952,31 @@ inline vector<int> localShuffle(const vector<int>& tour) {
     uniform_int_distribution<size_t> randomOffset(1, N / 2);
     size_t A = randomOffset(rng);
     shuffle(newTour.begin() + A, newTour.begin() + A + subTourSize, rng);
-
     return newTour;
 }
 
-inline vector<int> geoKShuffle(const vector<int>& tour) {
+inline void geoKShuffle(vector<int>& tour, vector<int> &position) {
+    if (tour.size() <= GEO_SHUFFLE_WIDTH) {
+        shuffle(tour.begin(), tour.end(), rng);
+        for (int i = 0; i < tour.size(); ++i) {
+            position[tour[i]] = i;
+        }
+        return;
+    }
 
+    int blockSize = 2 * GEO_SHUFFLE_WIDTH; // can tune this
+    int numBlocks = tour.size() / blockSize;
+    int left, right;
+    for (int i = 0; i < numBlocks; ++i) {
+        left = i * blockSize;
+        right = i * blockSize + GEO_SHUFFLE_WIDTH;
+        // cout << left << ", " << right << "\n";
+        shuffle(tour.begin() + left, tour.begin() + right, rng);
+    }
+    for (int i = 0; i < tour.size(); ++i) {
+        position[tour[i]] = i;
+    }
+    return;
 }
 
 
@@ -1117,31 +1144,34 @@ int main(int argc, char *argv[]) {
 
     auto dl = now() + chrono::milliseconds(EXECUTION_DURATION);
     
-    cout << "initial len t1: " << length(t1, d) << "\n";
-    threeOpt(t1, d, neighbor, p1, mx1, mi1, dl);
-    cout << "final len t1: " << length(t1, d) << "\n";
+    // cout << "initial len t1: " << length(t1, d) << "\n";
+    // threeOpt(t1, d, neighbor, p1, mx1, mi1, dl);
+    // cout << "final len t1: " << length(t1, d) << "\n";
 
-    cout << "initial len t2: " << length(t2, d) << "\n";
-    threeOptFast(t2, d, neighbor, p2, mx2, mi2);
-    cout << "len t2 (iter: 1): " << length(t2, d) << "\n";
-    threeOptFast(t2, d, neighbor, p2, mx2, mi2);
-    cout << "len t2 (iter: 2): " << length(t2, d) << "\n";
-    threeOptFast(t2, d, neighbor, p2, mx2, mi2);
-    cout << "len t2 (iter: 3): " << length(t2, d) << "\n";
+    // cout << "initial len t2: " << length(t2, d) << "\n";
+    // threeOptFast(t2, d, neighbor, p2, mx2, mi2);
+    // cout << "len t2 (iter: 1): " << length(t2, d) << "\n";
+    // threeOptFast(t2, d, neighbor, p2, mx2, mi2);
+    // cout << "len t2 (iter: 2): " << length(t2, d) << "\n";
+    // threeOptFast(t2, d, neighbor, p2, mx2, mi2);
+    // cout << "len t2 (iter: 3): " << length(t2, d) << "\n";
 
+    // checkConsistent(t2, p2);
 
     // testing
-    // vector<int> t;
-    // for (int i = 0; i < 20; ++i) {
-    //     t.push_back(i);
-    // }
-    // vector<int> position; position.resize(t.size());
-    // for (int i = 0; i < t.size(); ++i) {
-    //     position[t[i]] = i;
-    // }
+    vector<int> t;
+    for (int i = 0; i < d.rows(); ++i) {
+        t.push_back(i);
+    }
+    vector<int> position; position.resize(t.size());
+    for (int i = 0; i < t.size(); ++i) {
+        position[t[i]] = i;
+    }
 
-    // reverse(t, 0, 1, position);
-    // printVec(t); printVec(position);
+    printTourAndPos(t, position);
+    geoKShuffle(t, position);
+    checkConsistent(t, position);
+    printTourAndPos(t, position);
 
     return 0;
 }

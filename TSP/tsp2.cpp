@@ -55,6 +55,23 @@ void printVecVec(vector<vector<int>> &adjList) {
     }
 }
 
+vector<int> getPositionVec(vector<int> &tour) {
+    vector<int> position; position.resize(tour.size());
+    for (int i = 0; i < tour.size(); ++i) {
+        position[tour[i]] = i;
+    }
+    return position;
+}
+
+long getMaxWeight(vector<int> &tour, Matrix<long> &d) {
+    int N = tour.size();
+    long m = 0;
+    for (int i = 0; i < N; ++i) {
+        m = max(m, d[tour[i]][tour[(i + 1) % N]]);
+    }
+    return m;
+}
+
 // check if a position vector matches a tour vector
 void checkConsistent(vector<int> &tour, vector<int> &position) {
     assert(tour.size() == position.size());
@@ -125,12 +142,12 @@ inline long long length(const vector<int>& tour, const Matrix<long>& d) {
  * @param end End index of segment to reverse.
  * @param position Position of each city in the input tour. Will be updated.
  */
-inline void reverse(vector<int> &tour, size_t start, size_t end, vector<int>& position) {
-    size_t N = tour.size();
-    size_t numSwaps = (( (start <= end ? end - start : (end + N) - start) + 1)/2);
+inline void reverse(vector<int> &tour, int start, int end, vector<int>& position) {
+    int N = tour.size();
+    int numSwaps = (start <= end ? end - start + 1: end + N - start + 1) / 2;
     int i = start;
     int j = end;
-    for (size_t n = 0; n < numSwaps; ++n) {
+    for (int n = 0; n < numSwaps; ++n) {
         swap(tour[i], tour[j]);
         position[tour[i]] = i;
         position[tour[j]] = j;
@@ -679,7 +696,7 @@ inline void threeOptFast(vector<int>& tour, const Matrix<long>& d,
         const Matrix<int>& neighbor, vector<int> &position,
         long& max, long min) {
     int N = tour.size();
-    int WIDTH = 20; // search width
+    int WIDTH = 40; // search width N/4 is pretty good already
 
     int A, B, C, D, E, F;
     int A_i, B_i, C_i, D_i, E_i, F_i;
@@ -699,19 +716,24 @@ inline void threeOptFast(vector<int>& tour, const Matrix<long>& d,
             for (size_t j = 0; j < WIDTH; ++j) {
                 B_i = (C_i + N - j) % N; // we allow B_i = C_i
                 A_i = (B_i + N - 1) % N;
+                if (A_i == D_i) break; // wraparound too far // can remove this if you use WIDTH N/2 and below
                 A = tour[A_i];
                 B = tour[B_i];
                 
                 for (int k = 0; k < WIDTH; ++k) {
                     E_i = (D_i + k) % N;
                     F_i = (E_i + 1) % N;
+                    E = tour[E_i];
+                    F = tour[F_i];
                     if (E_i == A_i) {
                         break; // overlap, A-B ... C-D ... (E=A)-B
                     }
+                    // vector<int> o{A_i, B_i, C_i, D_i, E_i, F_i};
+                    // cout << "chosen vertices:\n";
+                    // printVec(o);
 
                     // consider the 4 cases
                     // Try exchanging AB, CD and EF for another edge triple.
-                    bool changed = false;
                     long d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F];
                     if (d[A][D] + d[E][C] + d[B][F] < d_AB_CD_EF) {
                         // original: F..A - B..C - D..E
@@ -720,7 +742,7 @@ inline void threeOptFast(vector<int>& tour, const Matrix<long>& d,
                         swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
                         max = maximum(max, d[A][D], d[E][C], d[B][F]);
                         locallyOptimal = false;
-                        goto next_PQ; // Go to next edge PQ.
+                        goto next_CD; // Go to next edge CD
                     } else if (d[D][B] + d[C][F] + d[A][E] < d_AB_CD_EF) {
                         // original: F..A - B..C - D..E
                         // new tour: F..A - E..D - B..C
@@ -728,7 +750,7 @@ inline void threeOptFast(vector<int>& tour, const Matrix<long>& d,
                         swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
                         max = maximum(max, d[D][B], d[C][F], d[A][E]);
                         locallyOptimal = false;
-                        goto next_PQ; // Go to next edge PQ.
+                        goto next_CD; // Go to next edge CD.
                     } else if (d[A][C] + d[B][E] + d[D][F] < d_AB_CD_EF) {
                         // original: F..A - B..C - D..E
                         // new tour: F..A - C..B - E..D
@@ -736,18 +758,18 @@ inline void threeOptFast(vector<int>& tour, const Matrix<long>& d,
                         reverse(tour, D_i, E_i, position);
                         max = maximum(max, d[A][C], d[B][E], d[D][F]);
                         locallyOptimal = false;
-                        goto next_PQ; // Go to next edge PQ.
+                        goto next_CD; // Go to next edge CD.
                     } else if (d[E][B] + d[C][F] + d[A][D] < d_AB_CD_EF) {
                         // original: F..A - B..C - D..E
                         // new tour: F..A - D..E - B..C
                         swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
                         max = maximum(max, d[E][B], d[C][F], d[A][D]);
                         locallyOptimal = false;
-                        goto next_PQ; // Go to next edge PQ.
+                        goto next_CD; // Go to next edge CD.
                     }
                 }
             }
-            next_PQ: continue;
+            next_CD: continue;
         }
     }
 }
@@ -926,6 +948,10 @@ inline vector<int> localShuffle(const vector<int>& tour) {
     return newTour;
 }
 
+inline vector<int> geoKShuffle(const vector<int>& tour) {
+
+}
+
 
 /**
  * Approximates optimal TSP tour through graph read from the given input stream.
@@ -971,9 +997,10 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     }
 
     // Optimize tour with 2-opt + 3-opt.
-    twoOpt(tour, d, neighbor, position, max, min);
-    twoHOpt(tour, d, neighbor, position, max, min);
-    threeOpt(tour, d, neighbor, position, max, min, threeOptDeadline);
+    // twoOpt(tour, d, neighbor, position, max, min);
+    // twoHOpt(tour, d, neighbor, position, max, min);
+    threeOptFast(tour, d, neighbor, position, max, min);
+    // threeOpt(tour, d, neighbor, position, max, min, threeOptDeadline);
 
     /*
      * Main loop.
@@ -1024,7 +1051,8 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
         // Optimize tour with 2-opt + 3-opt.
         twoOpt(tour, d, neighbor, position, max, min);
         twoHOpt(tour, d, neighbor, position, max, min);
-        threeOpt(tour, d, neighbor, position, max, min, threeOptDeadline);
+        threeOptFast(tour, d, neighbor, position, max, min);
+        // threeOpt(tour, d, neighbor, position, max, min, threeOptDeadline);
 
         // compare with best tour
         long long tourLength = length(tour, d);
@@ -1077,17 +1105,43 @@ int main(int argc, char *argv[]) {
     // }
     // cout << "tour len: " << st.size() << "\n";
 
-    // vector<int> t = twoApprox(d);
+    const Matrix<int> neighbor = createNeighborsMatrix(d, MAX_K);
+    vector<int> t1 = twoApprox(d);
+    vector<int> t2 = t1;
+    vector<int> p1 = getPositionVec(t1);
+    vector<int> p2 = getPositionVec(t2);
+    long mx1 = getMaxWeight(t1, d);
+    long mx2 = getMaxWeight(t2, d);
+    long mi1 = minDistance(d);
+    long mi2 = minDistance(d);
+
+    auto dl = now() + chrono::milliseconds(EXECUTION_DURATION);
+    
+    cout << "initial len t1: " << length(t1, d) << "\n";
+    threeOpt(t1, d, neighbor, p1, mx1, mi1, dl);
+    cout << "final len t1: " << length(t1, d) << "\n";
+
+    cout << "initial len t2: " << length(t2, d) << "\n";
+    threeOptFast(t2, d, neighbor, p2, mx2, mi2);
+    cout << "len t2 (iter: 1): " << length(t2, d) << "\n";
+    threeOptFast(t2, d, neighbor, p2, mx2, mi2);
+    cout << "len t2 (iter: 2): " << length(t2, d) << "\n";
+    threeOptFast(t2, d, neighbor, p2, mx2, mi2);
+    cout << "len t2 (iter: 3): " << length(t2, d) << "\n";
+
 
     // testing
-    vector<int> t;
-    for (int i = 0; i < 20; ++i) {
-        t.push_back(i);
-    }
-    vector<int> position; position.resize(t.size());
-    for (int i = 0; i < t.size(); ++i) {
-        position[t[i]] = i;
-    }
+    // vector<int> t;
+    // for (int i = 0; i < 20; ++i) {
+    //     t.push_back(i);
+    // }
+    // vector<int> position; position.resize(t.size());
+    // for (int i = 0; i < t.size(); ++i) {
+    //     position[t[i]] = i;
+    // }
+
+    // reverse(t, 0, 1, position);
+    // printVec(t); printVec(position);
 
     return 0;
 }

@@ -18,8 +18,8 @@ def avg(lst):
 def bold(string):
 	return '\033[1m' + string + '\033[0m'
 
-# 𝑥=(Val−Opt)/(Naive−Opt). 
-#(In the special case that Naive=Opt, define 𝑥=0 if Val=Opt, and 𝑥=∞ if Val>Opt.)
+# =x = (Val - Opt) / (Naive - Opt)
+# (In the special case that Naive=Opt, define x=0 if Val=Opt, and x = infty if Val>Opt.)
 def kattisScore(val, opt, naive):
 	if naive == opt:
 		if val == opt:

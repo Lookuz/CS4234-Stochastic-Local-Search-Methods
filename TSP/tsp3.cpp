@@ -597,9 +597,7 @@ inline void twoOpt(vector<int>& tour, const Matrix<long>& d,
                 if (v == w || u == z) {
                     continue; // Skip adjacent edges.
                 }
-
-                // d[u][w] + min is a lower bound on new length.
-                // d[u][v] + max is an upper bound on old length.
+                
                 if (d[u][w] + min > d[u][v] + max) {
                     break; // Go to next edge uv.
                 }

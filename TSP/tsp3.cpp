@@ -14,21 +14,11 @@
 
 #define DEBUG 0 // set to 1 to activate debug outputs 
 
-#ifdef DEBUG
-    #define LOG(x) std::cerr << x << std::endl
-#else
-    #define LOG(x)
-#endif
-
 using namespace std;
 
-typedef pair<int, int> ii;
-typedef vector<int> vi;
-typedef vector<ii> vii;
-
-// Random number generator.
-random_device rd;
+random_device rd; // Random number generator.
 default_random_engine rng(rd());
+chrono::time_point<chrono::high_resolution_clock> ts1, ts2;
 
 // Size of nearest neighbors matrix.
 const static size_t MAX_K = 20;
@@ -37,7 +27,24 @@ const static int THREE_OPT_BUFFER_TIME = 50;
 const static int EXECUTION_DURATION = 1950; // time for the whole algo
 const static int GEO_SHUFFLE_WIDTH = 10;
 
-// ---------------- Helper functions -------------------------------------------------
+// Return the current time.
+static inline chrono::time_point<chrono::high_resolution_clock> now() {
+    return chrono::high_resolution_clock::now();
+}
+// Output stream operator for durations.
+template<typename T, typename E>
+inline ostream& operator<<(ostream& out, const chrono::duration<T, E>& d) {
+    out << chrono::duration_cast<chrono::milliseconds>(d).count() << " ms";
+    return out;
+}
+
+static inline void startWatch() {
+    ts1 = now();
+}
+static inline void stopWatch() {
+    ts2 = now();
+    cout << "time elapsed: " << ts1 - ts2 << "\n";
+}
 
 void printVec(vector<int> v) {
     for (const auto& n : v) {
@@ -63,7 +70,7 @@ void printTourAndPos(vector<int> &tour, vector<int> &position) {
     printVec(position);
 }
 
-vector<int> getPositionVec(vector<int> &tour) {
+inline vector<int> getPositionVec(vector<int> &tour) {
     vector<int> position; position.resize(tour.size());
     for (int i = 0; i < tour.size(); ++i) {
         position[tour[i]] = i;
@@ -71,7 +78,7 @@ vector<int> getPositionVec(vector<int> &tour) {
     return position;
 }
 
-long getMaxWeight(vector<int> &tour, Matrix<long> &d) {
+inline long getMaxWeight(vector<int> &tour, Matrix<long> &d) {
     int N = tour.size();
     long m = 0;
     for (int i = 0; i < N; ++i) {
@@ -80,24 +87,12 @@ long getMaxWeight(vector<int> &tour, Matrix<long> &d) {
     return m;
 }
 
-// check if a position vector matches a tour vector
+// check if a position vector matches a tour vector.
 void checkConsistent(vector<int> &tour, vector<int> &position) {
     assert(tour.size() == position.size());
     for (int i = 0; i < position.size(); ++i) {
         assert(position[tour[i]] == i);
     }
-}
-
-// Return the current time.
-static inline chrono::time_point<chrono::high_resolution_clock> now() {
-    return chrono::high_resolution_clock::now();
-}
-
-// Output stream operator for durations.
-template<typename T, typename E>
-inline ostream& operator<<(ostream& out, const chrono::duration<T, E>& d) {
-    out << chrono::duration_cast<chrono::milliseconds>(d).count() << " ms";
-    return out;
 }
 
 // 3-argument maximum function.
@@ -112,9 +107,8 @@ static inline T maximum(const T& a, const T& b, const T& c, const T& d) {
     return max(a, max(b, max(c, d)));
 }
 
-/**
- * Returns the shortest distance d[i][j], i != j in the given distance matrix.
- */
+
+// Returns the shortest distance d[i][j], i != j in the given distance matrix.
 long minDistance(const Matrix<long>& d) {
     size_t N = d.rows();
     long min = numeric_limits<long>::max();
@@ -127,9 +121,7 @@ long minDistance(const Matrix<long>& d) {
     return min;
 }
 
-/**
- * Returns the total length of a tour.
- */
+// Returns the total length of a tour.
 inline long long length(const vector<int>& tour, const Matrix<long>& d) {
     size_t N = tour.size();
     long long length = 0;
@@ -152,7 +144,7 @@ inline long long length(const vector<int>& tour, const Matrix<long>& d) {
  */
 inline void reverse(vector<int> &tour, int start, int end, vector<int>& position) {
     int N = tour.size();
-    int numSwaps = (start <= end ? end - start + 1: end + N - start + 1) / 2;
+    int numSwaps = (start <= end ? (end - start + 1) : (end + N - start + 1)) / 2;
     int i = start;
     int j = end;
     for (int n = 0; n < numSwaps; ++n) {
@@ -168,9 +160,11 @@ inline void reverse(vector<int> &tour, int start, int end, vector<int>& position
 // and swaps to ... C .. D - A .. B ...
 // takes in indices, not nodeId's
 // assumes that A .. B precedes C .. D!
+// todo: i feel like this can be optimized but idk how
 inline void swapAdjacentSegments(vector<int> &tour, vector<int>& position, int A, int B, int C, int D) {
     int N = tour.size();
     vector<int> temp;
+
     int cur = C;
     while (cur != D) {
         temp.push_back(tour[cur]);
@@ -188,7 +182,7 @@ inline void swapAdjacentSegments(vector<int> &tour, vector<int>& position, int A
     for (int i = 0; i < temp.size(); ++i) { // copy over to tour
         tour[(A + i) % N] = temp[i];
         position[temp[i]] = (A + i) % N;
-    }
+    }    
 }
 
 /**
@@ -318,9 +312,7 @@ Matrix<long> createAlphaMatrix(Matrix<long> &adjMatrix) { // adjMatrix is square
     return alphaMatrix;
 }
 
-/**
- * Create a distance matrix from an input stream and return it.
- */
+// Create a distance matrix from an input stream and return it.
 Matrix<long> createDistanceMatrix(istream& in) {
     // Read vertex coordinates.
     size_t N;
@@ -374,14 +366,7 @@ Matrix<int> createNeighborsMatrix(const Matrix<long>& d, size_t K) {
     return neighbor;
 }
 
-/**
- * Calculates a greedy TSP tour.
- *
- * This is the naive algorithm given in the Kattis problem description.
- *
- * @param d Distance matrix.
- * @return Greedy TSP tour.
- */
+// constructs a greedy tour
 inline vector<int> greedy(const Matrix<long>& d) {
     size_t N = d.rows();
     vector<int> tour(N);
@@ -402,7 +387,7 @@ inline vector<int> greedy(const Matrix<long>& d) {
     return tour;
 }
 
-// do the 2-approx MST construction
+// constructs the 2-approx MST-based tour
 inline vector<int> twoApprox(const Matrix<long>& d) {
     int N = d.rows();
     if (N == 1) {
@@ -451,7 +436,7 @@ inline vector<int> twoApprox(const Matrix<long>& d) {
     }
 
     #if DEBUG
-    cout << "adjList:\n";
+    cout << "2-Approx:\nadjList:\n";
     printVecVec(adjList);
     cout << "tour\n";
     printVec(tour);
@@ -460,11 +445,9 @@ inline vector<int> twoApprox(const Matrix<long>& d) {
     return tour;
 }
 
-// algorithm for initial tour
-// greedily chooses the shortest edges first to construct a tour
+// constructs algorithm for initial tour by greedily choosing shortest edges first
 // O(N^2 log N)
-// there is a faster version, but I dont think it will help much
-vector<int> multiFragSlow(const Matrix<long>& d) {
+vector<int> multiFrag(const Matrix<long>& d) {
     int N = d.rows();
     if (N == 1) {
         return {0};
@@ -551,7 +534,7 @@ inline int succ(vector<int> &tour, vector<int> &position, int &t1) {
 }
 
 // returns whether t1 and t2 are adjacent in the tour
-inline bool isAdjacent(vector<int> &tour, vector<int> &position, int t1, int t2) {
+inline bool isAdjacent(vector<int> &tour, vector<int> &position, int &t1, int &t2) {
     return (pred(tour, position, t1) == t2 || succ(tour, position, t1) == t2);
 }
 
@@ -699,7 +682,114 @@ inline void twoHOpt(vector<int>& tour, const Matrix<long>& d,
     }
 }
 
-// 3-opt, but to speed it up, we assume that the edges used in the 3-opt swap are close to each other
+// 3-opt, but removed isomorphic cases
+inline void threeOptV2(vector<int>& tour, const Matrix<long>& d,
+        const Matrix<int>& neighbor, vector<int> &position,
+        long& max, long min) {
+    int N = tour.size();
+    int WIDTH = 10; // can reduce the number of nearest neighbors you consider
+
+    int A, B, C, D, E, F;
+    int A_i, B_i, C_i, D_i, E_i, F_i;
+
+    int count = 0;
+    bool locallyOptimal = false;
+    while (!locallyOptimal) {
+        count++; // record number of times we enter here
+        locallyOptimal = true;
+
+        // For each edge CD.
+        long d_AB_CD_EF;
+        for (size_t i = 0; i < N; ++i) {
+            C_i = i;
+            D_i = (C_i + 1) % N;
+            C = tour[C_i];
+            D = tour[D_i];
+
+            for(int j = 0; j < neighbor.cols(); ++j) {
+                F = neighbor[C][j]; // a nearest neighbor of C
+                if (F == D) continue;
+                F_i = position[F];
+
+                // if (d[C][F] + 2 * min > d[C][D] + 2 * max) // breaking CD is definitely bad move
+                //     break; // Go to next edge PQ.
+
+                for (int k = 0; k < neighbor.cols(); ++k) {
+                    A = neighbor[D][k]; // nearest neighbor of D
+                    if (A == C || A == F) continue;
+                    A_i = position[A];
+    
+                    // case 1: C-F and D-A criss-cross
+                    // A .. C - D .. F
+                    if (
+                        (C_i < D_i && D_i < F_i && F_i < A_i) ||
+                        (D_i < F_i && F_i < A_i && A_i < C_i) ||
+                        (F_i < A_i && A_i < C_i && C_i < D_i) ||
+                        (A_i < C_i && C_i < D_i && D_i < F_i)) {
+                        B_i = (A_i + 1) % N; // init B and E
+                        E_i = (F_i + N - 1) % N;
+                        B = tour[B_i];
+                        E = tour[E_i];
+                        if (B == C || E == D) continue;
+                        
+                        d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F];
+                        if (d[E][B] + d[C][F] + d[A][D] < d_AB_CD_EF) {
+                            // cout << "case1\n";
+                            // original: F..A - B..C - D..E
+                            // new tour: F..A - D..E - B..C
+                            swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
+                            max = maximum(max, d[E][B], d[C][F], d[A][D]);
+                            locallyOptimal = false;
+                            goto next_CD; // Go to next edge CD.
+                        } else if (d[D][B] + d[C][F] + d[A][E] < d_AB_CD_EF) {
+                            // cout << "case2\n";
+                            // original: F..A - B..C - D..E
+                            // new tour: F..A - E..D - B..C
+                            reverse(tour, D_i, E_i, position);
+                            swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
+                            max = maximum(max, d[D][B], d[C][F], d[A][E]);
+                            locallyOptimal = false;
+                            goto next_CD; // Go to next edge CD.
+                        }
+                    } else {
+                        // case 2: C-F and D-A are parallel
+                        // F .. C - D .. A
+                        B_i = (A_i + N - 1) % N; // init B and E
+                        E_i = (F_i + 1) % N;
+                        B = tour[B_i]; E = tour[E_i];
+                        if (E == C || B == D) continue;
+                        d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F]; // init this
+                        // cout << "AB: " << d[A][B] << "\n";
+                        // cout << "CD: " << d[C][D] << "\n";
+                        // cout << "EF: " << d[E][F] << "\n";
+                        // cout << "CF: " << d[C][F] << "\n";
+                        // cout << "AD: " << d[A][D] << "\n";
+                        // cout << "BE: " << d[B][E] << "\n";
+                        // cout << d_AB_CD_EF << "\n";
+                        // cout << d[C][F] + d[A][D] + d[B][E] << "\n";
+                        if (d[C][F] + d[A][D] + d[B][E] < d_AB_CD_EF) {
+                            // cout << "case3\n";
+                            // there are 2 ways to reverse:
+                            // way 1
+                            // reverse(tour, D_i, B_i, position);
+                            // reverse(tour, D_i, F_i, position);
+                            // way 2
+                            reverse(tour, E_i, C_i, position);
+                            reverse(tour, D_i, B_i, position);
+                            max = maximum(max, d[C][F], d[A][D], d[B][E]);
+                            locallyOptimal = false;
+                            goto next_CD; // Go to next edge CD.
+                        }
+                    }
+                }
+            }
+            next_CD: continue;
+        }
+    }
+    cout << "threeOptV2 count: " << count << "\n";
+}
+
+// A more thorough 3-opt (by adjusting the WIDTH)
 inline void threeOptSlow(vector<int>& tour, const Matrix<long>& d,
         const Matrix<int>& neighbor, vector<int> &position,
         long& max, long min) {
@@ -813,9 +903,10 @@ inline void threeOpt(vector<int>& tour, const Matrix<long>& d,
     // AB, CD, EF is PQ, RS, TU, but in tour order.
     int A, B, C, D, E, F;
     size_t A_i, B_i, C_i, D_i, E_i, F_i;
-
+    int count = 0;
     bool locallyOptimal = false;
     while (!locallyOptimal) {
+        count++;
         locallyOptimal = true;
 
         // For each edge PQ.
@@ -905,6 +996,7 @@ inline void threeOpt(vector<int>& tour, const Matrix<long>& d,
             next_PQ: continue;
         }
     }
+    cout << "threeOpt count: " << count << "\n";
 }
 
 /**
@@ -1010,7 +1102,7 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
 
     // Generate initial tour. greedy/multiFrag/twoApprox
     // vector<int> tour = greedy(d);
-    vector<int> tour = multiFragSlow(d);
+    vector<int> tour = multiFrag(d);
 
     // Create max / position for initial 2-opt + 3-opt.
     vector<int> position(N);
@@ -1118,12 +1210,12 @@ int main(int argc, char *argv[]) {
     Matrix<long> d = createDistanceMatrix(cin);
 
     // Approximate/print a TSP tour in EXECUTION_DURATION milliseconds.
-    vector<int> st = approximate(d, now() + chrono::milliseconds(EXECUTION_DURATION));
+    // vector<int> st = approximate(d, now() + chrono::milliseconds(EXECUTION_DURATION));
 
     // print tour
-    for (auto city : st) {
-        cout << city << endl;
-    }
+    // for (auto city : st) {
+    //     cout << city << endl;
+    // }
     //cout << "tour len: " << st.size() << "\n";
 
     // for test.py
@@ -1137,31 +1229,41 @@ int main(int argc, char *argv[]) {
     //     cout << stLength << " " << optLength;
     // }
 
-    // const Matrix<int> neighbor = createNeighborsMatrix(d, MAX_K);
-    // vector<int> t1 = twoApprox(d);
-    // vector<int> t2 = t1;
-    // vector<int> p1 = getPositionVec(t1);
-    // vector<int> p2 = getPositionVec(t2);
-    // long mx1 = getMaxWeight(t1, d);
-    // long mx2 = getMaxWeight(t2, d);
-    // long mi1 = minDistance(d);
-    // long mi2 = minDistance(d);
+    const Matrix<int> neighbor = createNeighborsMatrix(d, MAX_K);
+    vector<int> t1 = twoApprox(d);
+    vector<int> t2 = t1;
+    vector<int> t3 = t1;
+    vector<int> p1 = getPositionVec(t1);
+    vector<int> p2 = getPositionVec(t2);
+    vector<int> p3 = getPositionVec(t3);
+    long mx1 = getMaxWeight(t1, d);
+    long mx2 = getMaxWeight(t2, d);
+    long mx3 = getMaxWeight(t3, d);
+    long mi1 = minDistance(d);
+    long mi2 = minDistance(d);
+    long mi3 = minDistance(d);
 
-    // auto dl = now() + chrono::milliseconds(EXECUTION_DURATION);
+    auto dl = now() + chrono::milliseconds(EXECUTION_DURATION);
     
-    // cout << "initial len t1: " << length(t1, d) << "\n";
-    // threeOpt(t1, d, neighbor, p1, mx1, mi1, dl);
-    // cout << "final len t1: " << length(t1, d) << "\n";
+    cout << "initial len t1: " << length(t1, d) << "\n";
+    startWatch();
+    threeOpt(t1, d, neighbor, p1, mx1, mi1, dl);
+    stopWatch();
+    cout << "final len t1: " << length(t1, d) << "\n\n";
 
-    // cout << "initial len t2: " << length(t2, d) << "\n";
-    // threeOptFast(t2, d, neighbor, p2, mx2, mi2);
-    // cout << "len t2 (iter: 1): " << length(t2, d) << "\n";
-    // threeOptFast(t2, d, neighbor, p2, mx2, mi2);
-    // cout << "len t2 (iter: 2): " << length(t2, d) << "\n";
-    // threeOptFast(t2, d, neighbor, p2, mx2, mi2);
-    // cout << "len t2 (iter: 3): " << length(t2, d) << "\n";
+    cout << "initial len t2: " << length(t2, d) << "\n";
+    startWatch();
+    threeOptV2(t2, d, neighbor, p2, mx2, mi2);
+    stopWatch();
+    cout << "len t2 (iter: 1): " << length(t2, d) << "\n\n";
+    
+    cout << "initial len t3: " << length(t3, d) << "\n";
+    startWatch();
+    threeOptSlow(t3, d, neighbor, p3, mx3, mi3);
+    stopWatch();
+    cout << "len t3 (iter: 1): " << length(t3, d) << "\n";
 
-    // checkConsistent(t2, p2);
+    checkConsistent(t2, p2);
 
     // testing
     // vector<int> t;

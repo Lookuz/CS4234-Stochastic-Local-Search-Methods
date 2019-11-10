@@ -27,6 +27,8 @@ const static int THREE_OPT_BUFFER_TIME = 30;
 const static int EXECUTION_DURATION = 1950; // time for the whole algo
 const static int GEO_SHUFFLE_WIDTH = 10;
 const static int MIN_IMPROVEMENTS_TO_REPEAT = 5; // number of improvements that a 2/3-opt loop must find to repeat that loop again
+const static int MAX_DEPROVEMENTS = 3;
+const static int SHUFFLE_PROBABILITY = 24; // chance to shuffle vs double bridge, value from 0 to 100
 
 // Return the current time.
 static inline chrono::time_point<chrono::high_resolution_clock> now() {
@@ -586,9 +588,8 @@ inline bool twoOptSingle(vector<int>& tour, const Matrix<long>& d,
     }
     return changed;
 }
-/**
- * Searches for 2 opt moves until no more can be made
- */
+
+// Searches for 2 opt moves until no more can be made
 inline void twoOptLoop(vector<int>& tour, const Matrix<long>& d,
         const Matrix<int>& neighbor, vector<int> &position,
         long& max, long min) {
@@ -635,6 +636,59 @@ inline void twoOptLoop(vector<int>& tour, const Matrix<long>& d,
         }
     }
 }
+
+// twoOptLoop, but we shortcut the search using partial gain method
+inline void twoOptLoopV2(vector<int>& tour, const Matrix<long>& d,
+        const Matrix<int>& neighbor, vector<int> &position,
+        long& max, long min) {
+    size_t N = d.rows(); // Number of cities.
+
+    // Candidate edges uv, wz and their positions in tour.
+    int u, v, w, z;
+    size_t u_i, v_i, w_i, z_i;
+
+    bool locallyOptimal = false;
+    while (!locallyOptimal) {
+        locallyOptimal = true;
+
+        // For each edge uv.
+        for (u_i = 0, v_i = 1; u_i < N; ++u_i, ++v_i) {
+            u = tour[u_i];
+            v = tour[v_i % N];
+
+            // For each edge wz (w k:th closest neighbor of u).
+            for (size_t k = 0; k < neighbor.cols(); ++k) {
+                w_i = position[neighbor[u][k]];
+                w = tour[w_i];
+                
+                if (d[u][w] >= d[u][v]) break; // WLOG only consider edges that (u, w) < (u, v)
+                                               // since neighbor list is sorted ascending, no point checking further 
+
+                z_i = w_i + 1;
+                z = tour[z_i % N];
+
+                if (v == w || u == z) {
+                    continue; // Skip adjacent edges.
+                }
+                
+                if (d[u][w] + min > d[u][v] + max) {
+                    break; // Go to next edge uv.
+                }
+
+                if (d[u][w] + d[v][z] < d[u][v] + d[w][z]) {
+                    //   --u w--        --u-w->
+                    //      X     ===>
+                    //   <-z v->        <-z-v--
+                    reverse(tour, v_i % N, w_i, position); // implicitly deletes and adds edges
+                    max = maximum(max, d[u][w], d[v][z]);
+                    locallyOptimal = false;
+                    break;
+                }
+            }
+        }
+    }
+}
+
 /**
  * Searches for 2 opt moves. If in 1 loop, the improvement is small, terminate
  * so it does not search until no more 2-opt is possible,
@@ -1028,260 +1082,185 @@ inline void threeOptLoopV2(vector<int>& tour, const Matrix<long>& d,
             for(int j = 0; j < neighbor.cols(); ++j) {
                 F = neighbor[C][j]; // a nearest neighbor of C
                 if (F == D) continue;
-                F_i = position[F];
-
-                if (d[C][F] + 2 * min > d[C][D] + 2 * max) // breaking CD is definitely bad move
-                    break; // Go to next edge PQ.
-
-                for (int k = 0; k < neighbor.cols(); ++k) {
-                    A = neighbor[D][k]; // nearest neighbor of D
-                    if (A == C || A == F) continue;
-                    A_i = position[A];
-    
-                    // case 1: C-F and D-A criss-cross
-                    // A .. C - D .. F
-                    if (
-                        (C_i < D_i && D_i < F_i && F_i < A_i) ||
-                        (D_i < F_i && F_i < A_i && A_i < C_i) ||
-                        (F_i < A_i && A_i < C_i && C_i < D_i) ||
-                        (A_i < C_i && C_i < D_i && D_i < F_i)) {
-                        B_i = (A_i + 1) % N; // init B and E
-                        E_i = (F_i + N - 1) % N;
-                        B = tour[B_i];
-                        E = tour[E_i];
-                        if (B == C || E == D) continue;
-                        
-                        d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F];
-                        if (d[E][B] + d[C][F] + d[A][D] < d_AB_CD_EF) {
-                            // cout << "case1\n";
-                            // original: F..A - B..C - D..E
-                            // new tour: F..A - D..E - B..C
-                            swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
-                            max = maximum(max, d[E][B], d[C][F], d[A][D]);
-                            locallyOptimal = false;
-                            goto next_CD; // Go to next edge CD.
-                        } else if (d[D][B] + d[C][F] + d[A][E] < d_AB_CD_EF) {
-                            // cout << "case2\n";
-                            // original: F..A - B..C - D..E
-                            // new tour: F..A - E..D - B..C
-                            reverse(tour, D_i, E_i, position);
-                            swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
-                            max = maximum(max, d[D][B], d[C][F], d[A][E]);
-                            locallyOptimal = false;
-                            goto next_CD; // Go to next edge CD.
-                        }
-                    } else {
-                        // case 2: C-F and D-A are parallel
-                        // F .. C - D .. A
-                        B_i = (A_i + N - 1) % N; // init B and E
-                        E_i = (F_i + 1) % N;
-                        B = tour[B_i]; E = tour[E_i];
-                        if (E == C || B == D) continue;
-                        d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F]; // init this
-                        if (d[C][F] + d[A][D] + d[B][E] < d_AB_CD_EF) {
-                            // cout << "case3\n";
-                            // there are 2 ways to reverse:
-                            // way 1
-                            // reverse(tour, D_i, B_i, position);
-                            // reverse(tour, D_i, F_i, position);
-                            // way 2
-                            reverse(tour, E_i, C_i, position);
-                            reverse(tour, D_i, B_i, position);
-                            max = maximum(max, d[C][F], d[A][D], d[B][E]);
-                            locallyOptimal = false;
-                            goto next_CD; // Go to next edge CD.
-                        }
-                    }
-                }
-            }
-            next_CD: continue;
-        }
-    }    
-}
-
-inline void threeOptBalancedV2(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long& max, long min) {
-    int N = tour.size();
-
-    int A, B, C, D, E, F;
-    int A_i, B_i, C_i, D_i, E_i, F_i;
-
-    bool locallyOptimal = false;
-    int count;
-    while (!locallyOptimal) {
-        locallyOptimal = true;
-        count = 0;
-
-        // For each edge CD.
-        long d_AB_CD_EF;
-        for (size_t i = 0; i < N; ++i) {
-            C_i = i;
-            D_i = (C_i + 1) % N;
-            C = tour[C_i];
-            D = tour[D_i];
-
-            for(int j = 0; j < neighbor.cols(); ++j) {
-                F = neighbor[C][j]; // a nearest neighbor of C
-                if (F == D) continue;
-                F_i = position[F];
-
-                if (d[C][F] + 2 * min > d[C][D] + 2 * max) // breaking CD is definitely bad move
-                    break; // Go to next edge PQ.
-
-                for (int k = 0; k < neighbor.cols(); ++k) {
-                    A = neighbor[D][k]; // nearest neighbor of D
-                    if (A == C || A == F) continue;
-                    A_i = position[A];
-    
-                    // case 1: C-F and D-A criss-cross
-                    // A .. C - D .. F
-                    if (
-                        (C_i < D_i && D_i < F_i && F_i < A_i) ||
-                        (D_i < F_i && F_i < A_i && A_i < C_i) ||
-                        (F_i < A_i && A_i < C_i && C_i < D_i) ||
-                        (A_i < C_i && C_i < D_i && D_i < F_i)) {
-                        B_i = (A_i + 1) % N; // init B and E
-                        E_i = (F_i + N - 1) % N;
-                        B = tour[B_i];
-                        E = tour[E_i];
-                        if (B == C || E == D) continue;
-                        
-                        d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F];
-                        if (d[E][B] + d[C][F] + d[A][D] < d_AB_CD_EF) {
-                            // cout << "case1\n";
-                            // original: F..A - B..C - D..E
-                            // new tour: F..A - D..E - B..C
-                            swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
-                            max = maximum(max, d[E][B], d[C][F], d[A][D]);
-                            locallyOptimal = false;
-                            ++count;
-                            goto next_CD; // Go to next edge CD.
-                        } else if (d[D][B] + d[C][F] + d[A][E] < d_AB_CD_EF) {
-                            // cout << "case2\n";
-                            // original: F..A - B..C - D..E
-                            // new tour: F..A - E..D - B..C
-                            reverse(tour, D_i, E_i, position);
-                            swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
-                            max = maximum(max, d[D][B], d[C][F], d[A][E]);
-                            locallyOptimal = false;
-                            ++count;
-                            goto next_CD; // Go to next edge CD.
-                        }
-                    } else {
-                        // case 2: C-F and D-A are parallel
-                        // F .. C - D .. A
-                        B_i = (A_i + N - 1) % N; // init B and E
-                        E_i = (F_i + 1) % N;
-                        B = tour[B_i]; E = tour[E_i];
-                        if (E == C || B == D) continue;
-                        d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F]; // init this
-                        if (d[C][F] + d[A][D] + d[B][E] < d_AB_CD_EF) {
-                            // cout << "case3\n";
-                            // there are 2 ways to reverse:
-                            // way 1
-                            // reverse(tour, D_i, B_i, position);
-                            // reverse(tour, D_i, F_i, position);
-                            // way 2
-                            reverse(tour, E_i, C_i, position);
-                            reverse(tour, D_i, B_i, position);
-                            max = maximum(max, d[C][F], d[A][D], d[B][E]);
-                            locallyOptimal = false;
-                            ++count;
-                            goto next_CD; // Go to next edge CD.
-                        }
-                    }
-                }
-            }
-            next_CD: continue;
-        }
-        if (count < MIN_IMPROVEMENTS_TO_REPEAT) return;
-    }    
-}
-
-// A very thorough 3-opt, which considers all adjacent edges
-// how many adjacent edges is determined by by adjusting the WIDTH
-inline void threeOptLoopSlow(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long& max, long min) {
-    int N = tour.size();
-    int WIDTH = 10; // search width N/4 is pretty good already
-
-    int A, B, C, D, E, F;
-    int A_i, B_i, C_i, D_i, E_i, F_i;
-
-    bool locallyOptimal = false;
-    while (!locallyOptimal) {
-        locallyOptimal = true;
-
-        // For each edge CD.
-        for (size_t i = 0; i < N; ++i) {
-            C_i = i;
-            D_i = (C_i + 1) % N;
-            C = tour[C_i];
-            D = tour[D_i];
-
-            // For each edge AB, AB before CD in the tour
-            for (size_t j = 0; j < WIDTH; ++j) {
-                B_i = (C_i + N - j) % N; // we allow B_i = C_i
-                A_i = (B_i + N - 1) % N;
-                if (A_i == D_i) break; // wraparound too far // can remove this if you use WIDTH N/2 and below
-                A = tour[A_i];
-                B = tour[B_i];
                 
-                for (int k = 0; k < WIDTH; ++k) {
-                    E_i = (D_i + k) % N;
-                    F_i = (E_i + 1) % N;
-                    E = tour[E_i];
-                    F = tour[F_i];
-                    if (E_i == A_i) {
-                        break; // overlap, A-B ... C-D ... (E=A)-B
-                    }
-                    // vector<int> o{A_i, B_i, C_i, D_i, E_i, F_i};
-                    // cout << "chosen vertices:\n";
-                    // printVec(o);
+                F_i = position[F];
 
-                    // consider the 4 cases
-                    // Try exchanging AB, CD and EF for another edge triple.
-                    long d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F];
-                    if (d[A][D] + d[E][C] + d[B][F] < d_AB_CD_EF) {
-                        // original: F..A - B..C - D..E
-                        // new tour: F..A - D..E - C..B
-                        reverse(tour, B_i, C_i, position); // B..C is short, so reverse this segment
-                        swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
-                        max = maximum(max, d[A][D], d[E][C], d[B][F]);
-                        locallyOptimal = false;
-                        goto next_CD; // Go to next edge CD
-                    } else if (d[D][B] + d[C][F] + d[A][E] < d_AB_CD_EF) {
-                        // original: F..A - B..C - D..E
-                        // new tour: F..A - E..D - B..C
-                        reverse(tour, D_i, E_i, position);
-                        swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
-                        max = maximum(max, d[D][B], d[C][F], d[A][E]);
-                        locallyOptimal = false;
-                        goto next_CD; // Go to next edge CD.
-                    } else if (d[A][C] + d[B][E] + d[D][F] < d_AB_CD_EF) {
-                        // original: F..A - B..C - D..E
-                        // new tour: F..A - C..B - E..D
-                        reverse(tour, B_i, C_i, position);
-                        reverse(tour, D_i, E_i, position);
-                        max = maximum(max, d[A][C], d[B][E], d[D][F]);
-                        locallyOptimal = false;
-                        goto next_CD; // Go to next edge CD.
-                    } else if (d[E][B] + d[C][F] + d[A][D] < d_AB_CD_EF) {
-                        // original: F..A - B..C - D..E
-                        // new tour: F..A - D..E - B..C
-                        swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
-                        max = maximum(max, d[E][B], d[C][F], d[A][D]);
-                        locallyOptimal = false;
-                        goto next_CD; // Go to next edge CD.
+                if (d[C][F] + 2 * min > d[C][D] + 2 * max) // breaking CD is definitely bad move
+                    break; // Go to next edge PQ.
+
+                for (int k = 0; k < neighbor.cols(); ++k) {
+                    A = neighbor[D][k]; // nearest neighbor of D
+                    if (A == C || A == F) continue;
+                    A_i = position[A];
+    
+                    // case 1: C-F and D-A criss-cross
+                    // A .. C - D .. F
+                    if (
+                        (C_i < D_i && D_i < F_i && F_i < A_i) ||
+                        (D_i < F_i && F_i < A_i && A_i < C_i) ||
+                        (F_i < A_i && A_i < C_i && C_i < D_i) ||
+                        (A_i < C_i && C_i < D_i && D_i < F_i)) {
+                        B_i = (A_i + 1) % N; // init B and E
+                        E_i = (F_i + N - 1) % N;
+                        B = tour[B_i];
+                        E = tour[E_i];
+                        if (B == C || E == D) continue;
+                        
+                        d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F];
+                        if (d[E][B] + d[C][F] + d[A][D] < d_AB_CD_EF) {
+                            // cout << "case1\n";
+                            // original: F..A - B..C - D..E
+                            // new tour: F..A - D..E - B..C
+                            swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
+                            max = maximum(max, d[E][B], d[C][F], d[A][D]);
+                            locallyOptimal = false;
+                            goto next_CD; // Go to next edge CD.
+                        } else if (d[D][B] + d[C][F] + d[A][E] < d_AB_CD_EF) {
+                            // cout << "case2\n";
+                            // original: F..A - B..C - D..E
+                            // new tour: F..A - E..D - B..C
+                            reverse(tour, D_i, E_i, position);
+                            swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
+                            max = maximum(max, d[D][B], d[C][F], d[A][E]);
+                            locallyOptimal = false;
+                            goto next_CD; // Go to next edge CD.
+                        }
+                    } else {
+                        // case 2: C-F and D-A are parallel
+                        // F .. C - D .. A
+                        B_i = (A_i + N - 1) % N; // init B and E
+                        E_i = (F_i + 1) % N;
+                        B = tour[B_i]; E = tour[E_i];
+                        if (E == C || B == D) continue;
+                        d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F]; // init this
+                        if (d[C][F] + d[A][D] + d[B][E] < d_AB_CD_EF) {
+                            // cout << "case3\n";
+                            // there are 2 ways to reverse:
+                            // way 1
+                            // reverse(tour, D_i, B_i, position);
+                            // reverse(tour, D_i, F_i, position);
+                            // way 2
+                            reverse(tour, E_i, C_i, position);
+                            reverse(tour, D_i, B_i, position);
+                            max = maximum(max, d[C][F], d[A][D], d[B][E]);
+                            locallyOptimal = false;
+                            goto next_CD; // Go to next edge CD.
+                        }
                     }
                 }
             }
             next_CD: continue;
         }
-    }
+    }    
 }
+
+// 3-opt
+inline void threeOptLoopV3(vector<int>& tour, const Matrix<long>& d,
+        const Matrix<int>& neighbor, vector<int> &position,
+        long &max, long min) {
+    int N = tour.size();
+
+    int A, B, P, Q, C, D;
+    int A_i, B_i, P_i, Q_i, C_i, D_i;
+    long delta1, delta2;
+
+    bool locallyOptimal = false;
+    while (!locallyOptimal) {
+        locallyOptimal = true;
+
+        // For each edge AB.
+        long d_AB_CD_EF;
+        for (A_i = 0; A_i < N; ++A_i) {
+            A = tour[A_i];
+            B_i = (A_i + 1) % N;
+            B = tour[B_i];
+
+            for(int i = 0; i < neighbor.cols(); ++i) {
+                P = neighbor[B][i]; // P is a nearest neighbor of B
+
+                delta1 = d[B][P] - d[A][B];
+                if (delta1 >= 0) break; // we want partial gain positive
+                
+                if (P == A) continue; // we want A B P distinct
+                
+                P_i = position[P];
+
+                // we have 2 choices, Q is either the pred or the succ of P
+                // try Q is successor first
+                Q_i = (P_i + 1) % N;
+                Q = tour[Q_i];
+                if (Q_i != A_i) { // all A B P Q are distinct
+                    for (int j = 0; j < neighbor.cols(); ++j) { // try to find C
+                        C = neighbor[Q][j];
+                        C_i = position[C];
+
+                        // check if C is valid 5th point
+                        if (C == P || C == A || C == B) continue; // C not distinct, try another C
+                        // C is between B and P
+                        if ((C_i < P_i && P_i < B_i) ||
+                            (P_i < B_i && B_i < C_i) ||
+                            (B_i < C_i && C_i < P_i)) { // C is between B and P
+                            delta2 = delta1 + d[Q][C] - d[P][Q];
+                            if (delta2 >= 0) break; // no point searching further down neighbor list
+
+                            // we have a good set of A,B,P,Q,C
+                            D_i = (C_i + 1) % N;
+                            D = tour[D_i];
+
+                            // vector<int> o{A_i, B_i, P_i, Q_i, C_i, D_i};
+                            // cout << "case 1: "; printVec(o);
+
+                            if (delta2 + d[A][D] - d[C][D] < 0) { // improving 3-opt move
+                                swapAdjacentSegments(tour, position, Q_i, A_i, B_i, C_i);
+                                max = maximum(max, d[B][P], d[Q][C], d[A][D]);
+                                locallyOptimal = false;
+                                
+                                goto next_AB;
+                            }
+                        }
+                    }
+                }
+                
+                // now, we try Q is pred
+                Q_i = (P_i + N - 1) % N;
+                Q = tour[Q_i];
+                if (Q_i != A_i) { // all A B P Q are distinct
+                    for (int j = 0; j < neighbor.cols(); ++j) { // try to find C
+                        C = neighbor[Q][j];
+                        C_i = position[C];
+
+                        // check if C is valid 5th point
+                        if (C == P || C == A || C == B) continue; // C not distinct, try another C
+                        // C is between B and P
+                        if ((C_i < P_i && P_i < B_i) ||
+                            (P_i < B_i && B_i < C_i) ||
+                            (B_i < C_i && C_i < P_i)) { // C is between B and P
+                            delta2 = delta1 + d[Q][C] - d[P][Q];
+                            if (delta2 >= 0) break; // no point searching further down neighbor list
+
+                            // we have a good set of A,B,P,Q,C
+                            D_i = (C_i + 1) % N;
+                            D = tour[D_i];
+
+                            // vector<int> o{A, B, P, Q, C, D};
+                            // cout << "case 1: "; printVec(o);
+
+                            if (delta2 + d[A][D] - d[C][D] < 0) { // improving 3-opt move
+                                reverse(tour, D_i, Q_i, position);
+                                reverse(tour, P_i, A_i, position);
+                                max = maximum(max, d[B][P], d[Q][C], d[A][D]);
+                                locallyOptimal = false;
+                                goto next_AB;
+                            }
+                        }
+                    }
+                }
+            }
+            next_AB: continue;
+        }
+    }    
+}
+
 
 
 // Perform a double bridge move on a tour.
@@ -1449,6 +1428,8 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     int numDB = 0; // number of double bridge moves
     int numShuffles = 0; // number of shuffle moves
     int numFailSinceLastShuffle = 0; // number of double bridges that failed to improve the tour
+    int numDeprovement = 0;
+    uniform_int_distribution<size_t> randomOffset(1, 100);
 
     for (i = 0; (now() + std::max(buffer, 2 * averageTime)) < deadline; ++i) {
         auto start = now();
@@ -1456,14 +1437,14 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
         if (N < 8) {
             shuffle(tour.begin(), tour.end(), rng); // Tiny tour, so just shuffle it instead.
         } else {
-            if (numFailSinceLastShuffle > NUM_DOUBLE_BRIDGE_BEFORE_LOCAL_SHUFFLE) {
-                geoKShuffleV1(tour);
-                numShuffles++;
-                // cout << "Shuffling at DB = " << numDB << "\n";
-                numFailSinceLastShuffle = 0;
+            // do double bridge move OR a shuffle depending on chance
+            size_t A = randomOffset(rng);
+            if (A <= SHUFFLE_PROBABILITY) {
+                geoKShuffleV2(tour);
+                //cout << "Shuffle!\n";
             } else {
-                // do double bridge move.
                 tour = doubleBridgeV1(tour);
+                //cout << "D-bridge!\n";
                 numDB++;
             }
         }
@@ -1477,29 +1458,39 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
 
         // Optimize tour with 2-opt + 3-opt.
         // startWatch();
-        twoOptLoop(tour, d, neighbor, position, max, min);
+        // twoOptLoop(tour, d, neighbor, position, max, min);
+        twoOptLoopV2(tour, d, neighbor, position, max, min);
         twoHOptLoop(tour, d, neighbor, position, max, min);
+        threeOptLoopV3(tour, d, neighbor, position, max, min);
         // stopWatch();
         // startWatch();
         // threeOptLoopV2(tour, d, neighbor, position, max, min);
         // stopWatch();
         // cout << "\n";
-        // threeOptBalancedV2(tour, d, neighbor, position, max, min);
-        // threeOptSlow(tour, d, neighbor, position, max, min);
         // threeOpt(tour, d, neighbor, position, max, min, threeOptDeadline);
         
         // compare with best tour
         long long tourLength = length(tour, d);
         if (tourLength < shortestTourLength) {
             // Shorter tour found.
-            shortestTour = tour;
+            shortestTour = tour; // store shorter tour
             shortestTourLength = tourLength;
-            numFailSinceLastShuffle = 0; // reset
-        } else if (tourLength == shortestTourLength) { // unsuccessful double bridge
-            numFailSinceLastShuffle++;
-        } else { // we deproved, so must revert
-            tour = shortestTour;
-            numFailSinceLastShuffle++;
+            numDeprovement = 0; // allow another bunch of deprovements
+            //cout << "found better tour\n";
+        } else if (tourLength == shortestTourLength) { // equal length
+            // we dont increase numDeprovement, see it as horizontal move
+            //cout << "found equal tour\n";
+        } else { // we deproved
+            ++numDeprovement;
+            if (numDeprovement > MAX_DEPROVEMENTS) { // we have allowed too many deproving double bridges
+                //cout << "reverting to best tour\n";
+                tour = shortestTour; // restore the best tour
+                numDeprovement = 0;
+            } else {
+                // continue with this worse tour and hope for improvement
+                //cout << "deproved, continuing\n";
+                ++numDeprovement;
+            }
         }
 
         // Collect statistics.
@@ -1543,31 +1534,18 @@ void benchMark(Matrix<long> &d) {
 
     auto dl = now() + chrono::milliseconds(EXECUTION_DURATION);
     
-    // bool changed = true;
-    // int count = 0;
-    // cout << "initial len t1: " << length(t1, d) << "\n";
-    // startWatch();
-    // while(changed) {
-    //     twoOpt(t1, d, neighbor, p1, mx1, mi1);
-    //     changed = twoHOptV1(t1, d, neighbor, p1, mx1, mi1);
-    //     cout << "len t1: " << length(t1, d) << "\n";
-    //     count++;
-    // }
-    // stopWatch();
-    // cout << "count: " << count << "\n\n";
+    cout << "initial len t1: " << length(t1, d) << "\n";
+    startWatch();
+    threeOptLoopV2(t1, d, neighbor, p1, mx1, mi1);
+    cout << "len t1: " << length(t1, d) << "\n";
+    stopWatch();
 
-    // changed = true;
-    // count = 0;
-    // cout << "initial len t2: " << length(t2, d) << "\n";
-    // startWatch();
-    // while(changed) {
-    //     twoOpt(t2, d, neighbor, p2, mx2, mi2);
-    //     changed = twoHOptV2(t2, d, neighbor, p2, mx2, mi2);
-    //     cout << "len t2: " << length(t2, d) << "\n";
-    //     count++;
-    // }
-    // stopWatch();
-    // cout << "count: " << count << "\n";
+    cout << "initial len t2: " << length(t2, d) << "\n";
+    startWatch();
+    threeOptLoopV3(t2, d, neighbor, p2, mx2, mi2);
+    cout << "len t2: " << length(t2, d) << "\n";
+    stopWatch();
+    
 }
 
 int main(int argc, char *argv[]) {
@@ -1576,9 +1554,10 @@ int main(int argc, char *argv[]) {
     // cout << d << "\n";
     // Approximate/print a TSP tour in EXECUTION_DURATION milliseconds.
     vector<int> st = approximate(d, now() + chrono::milliseconds(EXECUTION_DURATION));
-
+    // benchMark(d);
     // for test.py
-    int showDescription = 1; // 0 is for kattis. 1 is for human. 2 for test.py
+    int showDescription = 0; // 0 is for kattis. 1 is for human. 2 for test.py
+    
     uint64_t stLength = length(st, d);
     uint64_t optLength; cin >> optLength;
     if (showDescription == 0) { // print tour

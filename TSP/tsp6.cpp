@@ -226,95 +226,6 @@ inline void ordered(
     }
 }
 
-/* compute alpha values for the graph given
- * it will use prims to create the V-tree (where the special node is V-1)
- * Implementation is correct, but without subgradient optimization, no significant improvement to score
- */
-Matrix<long> createAlphaMatrix(Matrix<long> &adjMatrix) { // adjMatrix is square
-    vector<int> parent; // store predecessor of nodes in mst
-    vector<int> taken; // nodes in the partial mst
-    priority_queue<tuple<int, int, int>> pq;  // priority_queue is a max heap, we use -ve sign to reverse order
-    vector<vector<int>> mst; // adjList of mst, it is a DAG
-    vector<int> topoList; // store topo order of mst
-
-    int V = adjMatrix.rows() - 1; // we pretend last node doesn't exist
-    parent.assign(V, -1); // parent unknown
-    taken.assign(V, 0); // all unvisited
-    mst.assign(V, vector<int>());
-    
-    // process node 0
-    int firstNode = 0;
-    taken[firstNode] = 1;
-    topoList.push_back(firstNode);
-    for (int nbr = 1; nbr < V; ++nbr) { // neighbors of 0
-        pq.push({-1*adjMatrix[firstNode][nbr], -nbr, firstNode}); // -weight, -nodeId, parent
-    }
-    
-    int mst_cost = 0, num_taken = 0; // no edge has been taken
-    while (!pq.empty()) {
-        auto [w, u, p] = pq.top(); pq.pop();
-        w = -w; u = -u; // negate to reverse order
-        if (taken[u]) continue; // already taken, skipped
-        mst_cost += w; // add w of this edge
-        parent[u] = p; // rmb parent
-        taken[u] = 1; // mark taken
-        mst[p].push_back(u); // insert into mst
-        topoList.push_back(u); // rmb the topo order
-        
-        // process nbrs
-        for (int nbr = 1; nbr < V; ++nbr) {
-            if (nbr != u && !taken[nbr]) { // new node to add
-                pq.push({-1*adjMatrix[u][nbr], -nbr, u});
-            }
-        }                                         
-        ++num_taken;
-        if (num_taken == V - 1) break; // have enough edges
-    }
-    
-    // now with mst and topoList, we can compute the alpha matrix
-    Matrix<long> alphaMatrix(adjMatrix.rows(), adjMatrix.cols());
-    Matrix<long> betaMatrix(adjMatrix.rows(), adjMatrix.cols());
-
-    // compute alpha(V-1, j) where V is the distinguished node S
-    int specialNode = V;
-    long s1, s2; // shortest edges S -> j
-
-    if (adjMatrix[specialNode][0] <= adjMatrix[specialNode][1]) { // initialize s1, s2
-        s1 = adjMatrix[specialNode][0]; s2 = adjMatrix[specialNode][1];
-    } else {
-        s1 = adjMatrix[specialNode][1]; s2 = adjMatrix[specialNode][0];
-    }
-
-    for(int j = 2; j < V; ++j) {
-        if (adjMatrix[specialNode][j] < s1) { // new smallest edge
-            s2 = s1;
-            s1 = adjMatrix[specialNode][j];
-        } else if (adjMatrix[specialNode][j] < s2) { // new 2nd smallest edge
-            s2 = adjMatrix[specialNode][j]; 
-        }
-    }
-
-    for(int j = 0; j < V; ++j) { // a(S, j) is either 0 (as good as s1), or you replace s2
-        alphaMatrix[specialNode][j] = alphaMatrix[j][specialNode] = max(0l, adjMatrix[specialNode][j] - s2);
-    }
-    alphaMatrix[specialNode][specialNode] = -1; // undefined
-
-    // compute alpha(i, j) for all i except root
-    // root is 0
-    int root = 0;
-    for (int i = 0; i < V; ++i) { // for each node i except S and root
-        int u = topoList[i];
-        betaMatrix[u][u] = -1;
-        alphaMatrix[u][u] = -1;
-        for (int j = i+1; j < V; ++j) {
-            int v = topoList[j];
-            betaMatrix[u][v] = betaMatrix[v][u] = max(betaMatrix[u][parent[v]], adjMatrix[v][parent[v]]);
-            alphaMatrix[u][v] = alphaMatrix[v][u] = adjMatrix[u][v] - betaMatrix[u][v]; 
-        } 
-    }
-    return alphaMatrix;
-}
-
 // Create a distance matrix from an input stream and return it.
 Matrix<long> createDistanceMatrix(istream& in) {
     // Read vertex coordinates.
@@ -541,102 +452,6 @@ inline bool isAdjacent(vector<int> &tour, vector<int> &position, int &t1, int &t
     return (pred(tour, position, t1) == t2 || succ(tour, position, t1) == t2);
 }
 
-/**
- * Makes a single pass through the tour and finds 2-opt swaps
- * returns whether there was an improvement in the tour (at least 1 swap)
- */
-inline bool twoOptSingle(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long& max, const long &min) {
-    int N = d.rows(); // Number of cities.
-
-    // Candidate edges uv, wz and their positions in tour.
-    int u, v, w, z;
-    int u_i, v_i, w_i, z_i;
-
-    bool changed = false;
-    // For each edge uv.
-    for (u_i = 0, v_i = 1; u_i < N; ++u_i, ++v_i) {
-        u = tour[u_i];
-        v = tour[v_i % N];
-
-        // For each edge wz (w k:th closest neighbor of u).
-        for (int k = 0; k < neighbor.cols(); ++k) {
-            w_i = position[neighbor[u][k]]; // w is a closest neighbor of u
-            z_i = w_i + 1;
-            w = tour[w_i];
-            z = tour[z_i % N];
-
-            if (v == w || u == z) {
-                continue; // Skip adjacent edges.
-            }
-
-            if (d[u][w] + min > d[u][v] + max) { // adding u-w is definitely bad
-                break; // Go to next edge uv.
-            }
-
-            if (d[u][w] + d[v][z] < d[u][v] + d[w][z]) {
-                //   --u w--        --u-w->
-                //      X     ===>
-                //   <-z v->        <-z-v--
-                reverse(tour, v_i % N, w_i, position); // implicitly deletes and adds edges
-                max = maximum(max, d[u][w], d[v][z]);
-                changed = true;
-                break; // uv has been deleted, so try a different u
-            }
-        }
-    }
-    return changed;
-}
-
-// Searches for 2 opt moves until no more can be made
-inline void twoOptLoop(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long& max, long min) {
-    size_t N = d.rows(); // Number of cities.
-
-    // Candidate edges uv, wz and their positions in tour.
-    int u, v, w, z;
-    size_t u_i, v_i, w_i, z_i;
-
-    bool locallyOptimal = false;
-    while (!locallyOptimal) {
-        locallyOptimal = true;
-
-        // For each edge uv.
-        for (u_i = 0, v_i = 1; u_i < N; ++u_i, ++v_i) {
-            u = tour[u_i];
-            v = tour[v_i % N];
-
-            // For each edge wz (w k:th closest neighbor of u).
-            for (size_t k = 0; k < neighbor.cols(); ++k) {
-                w_i = position[neighbor[u][k]];
-                z_i = w_i + 1;
-                w = tour[w_i];
-                z = tour[z_i % N];
-
-                if (v == w || u == z) {
-                    continue; // Skip adjacent edges.
-                }
-                
-                if (d[u][w] + min > d[u][v] + max) {
-                    break; // Go to next edge uv.
-                }
-
-                if (d[u][w] + d[v][z] < d[u][v] + d[w][z]) {
-                    //   --u w--        --u-w->
-                    //      X     ===>
-                    //   <-z v->        <-z-v--
-                    reverse(tour, v_i % N, w_i, position); // implicitly deletes and adds edges
-                    max = maximum(max, d[u][w], d[v][z]);
-                    locallyOptimal = false;
-                    break;
-                }
-            }
-        }
-    }
-}
-
 // twoOptLoop, but we shortcut the search using partial gain method
 inline void twoOptLoopV2(vector<int>& tour, const Matrix<long>& d,
         const Matrix<int>& neighbor, vector<int> &position,
@@ -689,123 +504,6 @@ inline void twoOptLoopV2(vector<int>& tour, const Matrix<long>& d,
     }
 }
 
-/**
- * Searches for 2 opt moves. If in 1 loop, the improvement is small, terminate
- * so it does not search until no more 2-opt is possible,
- * but until it is not worth it to search anymore
- */
-inline void twoOptBalanced(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long& max, long min) {
-    int N = d.rows(); // Number of cities.
-
-    // Candidate edges uv, wz and their positions in tour.
-    int u, v, w, z;
-    int u_i, v_i, w_i, z_i;
-
-    bool locallyOptimal = false;
-    int count; // number of improvements per loop
-    while (!locallyOptimal) {
-        locallyOptimal = true;
-        count = 0;
-
-        // For each edge uv.
-        for (u_i = 0, v_i = 1; u_i < N; ++u_i, ++v_i) {
-            u = tour[u_i];
-            v = tour[v_i % N];
-
-            // For each edge wz (w k:th closest neighbor of u).
-            for (int k = 0; k < neighbor.cols(); ++k) {
-                w_i = position[neighbor[u][k]];
-                z_i = w_i + 1;
-                w = tour[w_i];
-                z = tour[z_i % N];
-
-                if (v == w || u == z) {
-                    continue; // Skip adjacent edges.
-                }
-                
-                if (d[u][w] + min > d[u][v] + max) {
-                    break; // Go to next edge uv.
-                }
-
-                if (d[u][w] + d[v][z] < d[u][v] + d[w][z]) {
-                    //   --u w--        --u-w->
-                    //      X     ===>
-                    //   <-z v->        <-z-v--
-                    reverse(tour, v_i % N, w_i, position); // implicitly deletes and adds edges
-                    max = maximum(max, d[u][w], d[v][z]);
-                    locallyOptimal = false;
-                    ++count;
-                    break;
-                }
-            }
-            if (count < MIN_IMPROVEMENTS_TO_REPEAT) return;
-        }
-    }
-}
-
-inline bool twoHOptSingle(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long& max, long min) {
-    size_t N = d.rows(); // Number of cities.
-
-    // Candidate edges uv, wz and their positions in tour.
-    int A, pA, sA, B, pB, sB; // pA = pred(A), sA = succ(A)
-    int A_i, pA_i, sA_i, B_i, pB_i, sB_i;
-    
-    bool changed = false;
-    int count = 0;
-    // For each node A
-    for (A_i = 0; A_i < N; ++A_i) {
-        pA_i = (A_i + N - 1) % N;
-        sA_i = (A_i + 1) % N;
-        A = tour[A_i];
-        pA = tour[pA_i]; 
-        sA = tour[sA_i];
-
-        // For each node B that is 'near' A
-        for (size_t k = 0; k < neighbor.cols(); ++k) {
-            B_i = position[neighbor[A][k]];
-            pB_i = (B_i + N - 1) % N;
-            sB_i = (B_i + 1) % N;
-            B = tour[B_i];
-            pB = tour[pB_i];
-            sB = tour[sB_i];
-
-            if (B == sA || B == pA) {
-                continue; // Skip
-            }
-
-            // pA -> A -> sA and B -> sB
-            // becomes
-            // pA -> sA and B -> A -> sB
-            if (sB != pB &&
-                (d[pA][sA] + d[B][A] + d[A][sB] - d[pA][A] - d[A][sA] - d[B][sB] < 0)) { // can improve
-                // make the move
-                // sB_i to pA_i is fixed, no change
-                // shift sA onwards, back 1 step, until we shift B.
-                int cur = (pA_i + 1) % N;
-                int next;
-                while (cur != B_i) { // pos is at A_i now
-                    //cout << cur << "\n";
-                    next = (cur + 1) % N;
-                    tour[cur] = tour[next];
-                    position[tour[cur]] = cur;
-                    cur = next;
-                }
-                tour[cur] = A;
-                position[A] = cur;
-                // update
-                max = maximum(max, d[pA][sA], d[B][A], d[A][sB]);
-                changed = true;
-                count++;
-                break;
-            }
-        }
-    }
-    return changed;
-}
 inline void twoHOptLoop(vector<int>& tour, const Matrix<long>& d,
         const Matrix<int>& neighbor, vector<int> &position,
         long& max, long min) {
@@ -870,291 +568,7 @@ inline void twoHOptLoop(vector<int>& tour, const Matrix<long>& d,
     }
 }
 
-// This is the twoHOptSingle, but I rewrote it.
-// Somehow it doesn't improve tours as much
-// But it is slightly faster
-inline bool twoHOptSingleV2(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long& max, long min) {
-    int N = d.rows(); // Number of cities.
-
-    int A, pA, sA, B, sB; // pA = pred(A), sA = succ(A)
-    int A_i, pA_i, sA_i, B_i, sB_i;
-    int len1, len2;
-    bool changed = false;
-    // For each node A
-    for (A_i = 0; A_i < N; ++A_i) {
-        pA_i = (A_i + N - 1) % N;
-        sA_i = (A_i + 1) % N;
-        A = tour[A_i];
-        pA = tour[pA_i]; 
-        sA = tour[sA_i];
-        // For each node B that is 'near' A
-        for (size_t k = 0; k < neighbor.cols(); ++k) {
-            B = neighbor[A][k];
-            B_i = position[B];
-            sB_i = (B_i + 1) % N;
-            sB = tour[sB_i];
-            
-            if (B == pA || B == sA || sB == pA) continue; // overlapping will reduce to 2-Opt
-
-            // pA -> A -> sA and B -> sB
-            // becomes
-            // pA -> sA and B -> A -> sB
-            if (d[pA][sA] + d[B][A] + d[A][sB] < d[pA][A] + d[A][sA] + d[B][sB]) { // can improve
-                // there are 2 possible shifts, pA to B or sA to B. We choose the shorter one
-                len1 = ((B_i < pA_i) ? (pA_i - B_i) : (pA_i + N - B_i));// length from B to pA
-                len2 = ((sA_i < B_i) ? (B_i - sA_i) : (B_i + N - sA_i));// length from sA to B
-                
-                if (len2 < len1) {
-                    // shift segment sA to B back by 1 step.
-                    
-                    int cur = A_i;
-                    int next;
-                    while (cur != B_i) { // pos is at A_i now
-                        //cout << cur << "\n";
-                        next = (cur + 1) % N;
-                        tour[cur] = tour[next];
-                        position[tour[cur]] = cur;
-                        cur = next;
-                    }
-                    tour[cur] = A;
-                    position[A] = cur;
-                    max = maximum(max, d[pA][sA], d[B][A], d[A][sB]);
-                    changed = true;
-                    break;
-                } else {
-                    // shift segment sB to pA forward by 1 step.
-                    int cur = A_i;
-                    int prev;
-                    while (cur != sB_i) {
-                        //cout << cur << "\n";
-                        prev = (cur + N - 1) % N;
-                        tour[cur] = tour[prev];
-                        position[tour[cur]] = cur;
-                        cur = prev;
-                    }
-                    tour[cur] = A;
-                    position[A] = cur;
-                    max = maximum(max, d[pA][sA], d[B][A], d[A][sB]);;
-                    changed = true;
-                    break;
-                }
-            }
-        }
-    }
-    return changed;
-}
-
-// the original threeOpt
-inline void threeOptLoop(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int>& position,
-        long& max, long min,
-        const chrono::time_point<chrono::high_resolution_clock>& deadline) {
-    const size_t N = d.rows(); // Number of cities.
-
-    // Candidate edges PQ, RS, TU and their positions in tour.
-    int P, Q, R, S, T, U;
-    size_t P_i, Q_i, R_i, S_i, T_i, U_i;
-
-    // AB, CD, EF is PQ, RS, TU, but in tour order.
-    int A, B, C, D, E, F;
-    size_t A_i, B_i, C_i, D_i, E_i, F_i;
-    int count = 0;
-    bool locallyOptimal = false;
-    while (!locallyOptimal) {
-        count++;
-        locallyOptimal = true;
-
-        // For each edge PQ.
-        for (size_t i = 0; i < N; ++i) {
-            P_i = i;
-            Q_i = (P_i + 1) % N;
-            P = tour[P_i];
-            Q = tour[Q_i];
-
-            if (chrono::high_resolution_clock::now() > deadline)
-                return; // Deadline has passed, return early.
-
-            // For each edge RS (S j:th nearest neighbor of P).
-            for (size_t j = 0; j < neighbor.cols(); ++j) {
-                S_i = position[neighbor[P][j]];
-                R_i = (S_i + N - 1) % N;
-                R = tour[R_i];
-                S = tour[S_i];
-
-                if (P == R || R == Q) // RS same as, or follows, PQ.
-                    continue; // Go to next edge RS.
-
-                if (d[P][S] + 2 * min > d[P][Q] + 2 * max) // breaking PQ is definitely bad move
-                    break; // Go to next edge PQ.
-
-                if (d[P][S] + 2 * min > d[P][Q] + d[R][S] + max) // using RS is definitely bad move
-                    continue; // Go to next edge RS.
-
-                // For each edge TU (U k:th nearest neighbor of P).
-                for (size_t k = 0; k < neighbor.cols(); ++k) {
-                    U_i = position[neighbor[P][k]];
-                    T_i = (U_i + N - 1) % N;
-                    T = tour[T_i];
-                    U = tour[U_i];
-
-                    if (U == S || // TU same as RS.
-                        T == S || // TU follows RS.
-                        U == R || // TU preceeds RS.
-                        T == P || // TU same as PQ.
-                        T == Q)   // TU follows PQ.
-                        continue; // Go to next edge TU.
-
-                    if (d[P][S] + d[Q][U] + min > d[P][Q] + d[R][S] + max)
-                        break; // Go to next edge RS.
-
-                    // Let AB, CD, EF be the edges PQ, RS, TU in tour order.
-                    ordered(A, A_i, B, B_i, C, C_i, D, D_i, E, E_i, F, F_i,
-                            P, P_i, Q, Q_i, R, R_i, S, S_i, T, T_i, U, U_i);
-
-                    // Try exchanging AB, CD and EF for another edge triple.
-                    // See 3opt_cases.png for an illustration.
-                    bool changed = false;
-                    long d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F];
-                    if (d[D][A] + d[F][B] + d[C][E] < d_AB_CD_EF) {
-                        // Change AB, CD, EF to DA, FB, CE.
-                        reverse(tour, F_i, A_i, position);
-                        reverse(tour, D_i, E_i, position);
-                        max = maximum(max, d[D][A], d[F][B], d[C][E]);
-                        changed = true;
-                    } else if (d[B][D] + d[E][A] + d[F][C] < d_AB_CD_EF) {
-                        // Change AB, CD, EF to BD, EA, FC.
-                        reverse(tour, F_i, A_i, position);
-                        reverse(tour, B_i, C_i, position);
-                        max = maximum(max, d[B][D], d[E][A], d[F][C]);
-                        changed = true;
-                    } else if (d[A][C] + d[B][E] + d[D][F] < d_AB_CD_EF) {
-                        // Change AB, CD, EF to AC, BE, DF.
-                        reverse(tour, B_i, C_i, position);
-                        reverse(tour, D_i, E_i, position);
-                        max = maximum(max, d[A][C], d[B][E], d[D][F]);
-                        changed = true;
-                    } else if (d[B][E] + d[D][A] + d[F][C] < d_AB_CD_EF) {
-                        // Change AB, CD, EF to BE, DA, FC.
-                        reverse(tour, A_i, F_i, position);
-                        reverse(tour, B_i, C_i, position);
-                        reverse(tour, D_i, E_i, position);
-                        max = maximum(max, d[B][E], d[D][A], d[F][C]);
-                        changed = true;
-                    }
-
-                    if (changed) {
-                        locallyOptimal = false;
-                        goto next_PQ; // Go to next edge PQ.
-                    }
-                }
-            }
-            next_PQ: continue;
-        }
-    }
-    cout << "threeOpt count: " << count << "\n";
-}
-
-// 3-opt, but removed isomorphic cases
-// It seems to find more improvements
-// as well as much faster
-inline void threeOptLoopV2(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long& max, long min) {
-    int N = tour.size();
-
-    int A, B, C, D, E, F;
-    int A_i, B_i, C_i, D_i, E_i, F_i;
-
-    bool locallyOptimal = false;
-    while (!locallyOptimal) {
-        locallyOptimal = true;
-
-        // For each edge CD.
-        long d_AB_CD_EF;
-        for (size_t i = 0; i < N; ++i) {
-            C_i = i;
-            D_i = (C_i + 1) % N;
-            C = tour[C_i];
-            D = tour[D_i];
-
-            for(int j = 0; j < neighbor.cols(); ++j) {
-                F = neighbor[C][j]; // a nearest neighbor of C
-                if (F == D) continue;
-                
-                F_i = position[F];
-
-                if (d[C][F] + 2 * min > d[C][D] + 2 * max) // breaking CD is definitely bad move
-                    break; // Go to next edge PQ.
-
-                for (int k = 0; k < neighbor.cols(); ++k) {
-                    A = neighbor[D][k]; // nearest neighbor of D
-                    if (A == C || A == F) continue;
-                    A_i = position[A];
-    
-                    // case 1: C-F and D-A criss-cross
-                    // A .. C - D .. F
-                    if (
-                        (C_i < D_i && D_i < F_i && F_i < A_i) ||
-                        (D_i < F_i && F_i < A_i && A_i < C_i) ||
-                        (F_i < A_i && A_i < C_i && C_i < D_i) ||
-                        (A_i < C_i && C_i < D_i && D_i < F_i)) {
-                        B_i = (A_i + 1) % N; // init B and E
-                        E_i = (F_i + N - 1) % N;
-                        B = tour[B_i];
-                        E = tour[E_i];
-                        if (B == C || E == D) continue;
-                        
-                        d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F];
-                        if (d[E][B] + d[C][F] + d[A][D] < d_AB_CD_EF) {
-                            // cout << "case1\n";
-                            // original: F..A - B..C - D..E
-                            // new tour: F..A - D..E - B..C
-                            swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
-                            max = maximum(max, d[E][B], d[C][F], d[A][D]);
-                            locallyOptimal = false;
-                            goto next_CD; // Go to next edge CD.
-                        } else if (d[D][B] + d[C][F] + d[A][E] < d_AB_CD_EF) {
-                            // cout << "case2\n";
-                            // original: F..A - B..C - D..E
-                            // new tour: F..A - E..D - B..C
-                            reverse(tour, D_i, E_i, position);
-                            swapAdjacentSegments(tour, position, B_i, C_i, D_i, E_i);
-                            max = maximum(max, d[D][B], d[C][F], d[A][E]);
-                            locallyOptimal = false;
-                            goto next_CD; // Go to next edge CD.
-                        }
-                    } else {
-                        // case 2: C-F and D-A are parallel
-                        // F .. C - D .. A
-                        B_i = (A_i + N - 1) % N; // init B and E
-                        E_i = (F_i + 1) % N;
-                        B = tour[B_i]; E = tour[E_i];
-                        if (E == C || B == D) continue;
-                        d_AB_CD_EF = d[A][B] + d[C][D] + d[E][F]; // init this
-                        if (d[C][F] + d[A][D] + d[B][E] < d_AB_CD_EF) {
-                            // cout << "case3\n";
-                            // there are 2 ways to reverse:
-                            // way 1
-                            // reverse(tour, D_i, B_i, position);
-                            // reverse(tour, D_i, F_i, position);
-                            // way 2
-                            reverse(tour, E_i, C_i, position);
-                            reverse(tour, D_i, B_i, position);
-                            max = maximum(max, d[C][F], d[A][D], d[B][E]);
-                            locallyOptimal = false;
-                            goto next_CD; // Go to next edge CD.
-                        }
-                    }
-                }
-            }
-            next_CD: continue;
-        }
-    }    
-}
-
-// 3-opt
+// 3-opt properly done
 inline void threeOptLoopV3(vector<int>& tour, const Matrix<long>& d,
         const Matrix<int>& neighbor, vector<int> &position,
         long &max, long min) {
@@ -1255,6 +669,122 @@ inline void threeOptLoopV3(vector<int>& tour, const Matrix<long>& d,
                         }
                     }
                 }
+            }
+            next_AB: continue;
+        }
+    }    
+}
+
+// merges 2 and 3 opt
+inline void kOpt(vector<int>& tour, const Matrix<long>& d,
+        const Matrix<int>& neighbor, vector<int> &position,
+        long &max, long min) {
+    int N = tour.size();
+
+    int A, B, P, Q, C, D;
+    int A_i, B_i, P_i, Q_i, C_i, D_i;
+    long delta1, delta2;
+
+    bool locallyOptimal = false;
+    while (!locallyOptimal) {
+        locallyOptimal = true;
+
+        // For each edge AB.
+        long d_AB_CD_EF;
+        for (A_i = 0; A_i < N; ++A_i) {
+            A = tour[A_i];
+            B_i = (A_i + 1) % N;
+            B = tour[B_i];
+
+            for(int i = 0; i < neighbor.cols(); ++i) {
+                P = neighbor[B][i]; // P is a nearest neighbor of B
+
+                delta1 = d[B][P] - d[A][B];
+                if (delta1 >= 0) break; // we want partial gain positive
+                
+                if (P == A) continue; // we want A B P distinct
+                
+                P_i = position[P];
+
+                // we have 2 choices, Q is either the pred or the succ of P
+                // we try Q is pred first
+                Q_i = (P_i + N - 1) % N;
+                Q = tour[Q_i];
+                if (Q_i != A_i) { // all A B P Q are distinct
+                    // try see if 2-opt change here is improving
+                    if (delta1 - d[P][Q] + d[Q][A] < 0) {
+                        reverse(tour, B_i, Q_i, position);
+                        max = maximum(max, d[B][P], d[Q][A]);
+                        locallyOptimal = false;
+                        goto next_AB;
+                    }
+
+                    for (int j = 0; j < neighbor.cols(); ++j) { // try to find C
+                        C = neighbor[Q][j];
+                        C_i = position[C];
+
+                        // check if C is valid 5th point
+                        if (C == P || C == A || C == B) continue; // C not distinct, try another C
+                        // C is between B and P
+                        if ((C_i < P_i && P_i < B_i) ||
+                            (P_i < B_i && B_i < C_i) ||
+                            (B_i < C_i && C_i < P_i)) { // C is between B and P
+                            delta2 = delta1 + d[Q][C] - d[P][Q];
+                            if (delta2 >= 0) break; // no point searching further down neighbor list
+
+                            // we have a good set of A,B,P,Q,C
+                            D_i = (C_i + 1) % N;
+                            D = tour[D_i];
+
+                            // vector<int> o{A, B, P, Q, C, D};
+                            // cout << "case 1: "; printVec(o);
+
+                            if (delta2 + d[A][D] - d[C][D] < 0) { // improving 3-opt move
+                                reverse(tour, D_i, Q_i, position);
+                                reverse(tour, P_i, A_i, position);
+                                max = maximum(max, d[B][P], d[Q][C], d[A][D]);
+                                locallyOptimal = false;
+                                goto next_AB;
+                            }
+                        }
+                    }
+                }
+
+                // try Q is successor
+                Q_i = (P_i + 1) % N;
+                Q = tour[Q_i];
+                if (Q_i != A_i) { // all A B P Q are distinct
+                    for (int j = 0; j < neighbor.cols(); ++j) { // try to find C
+                        C = neighbor[Q][j];
+                        C_i = position[C];
+
+                        // check if C is valid 5th point
+                        if (C == P || C == A || C == B) continue; // C not distinct, try another C
+                        // C is between B and P
+                        if ((C_i < P_i && P_i < B_i) ||
+                            (P_i < B_i && B_i < C_i) ||
+                            (B_i < C_i && C_i < P_i)) { // C is between B and P
+                            delta2 = delta1 + d[Q][C] - d[P][Q];
+                            if (delta2 >= 0) break; // no point searching further down neighbor list
+
+                            // we have a good set of A,B,P,Q,C
+                            D_i = (C_i + 1) % N;
+                            D = tour[D_i];
+
+                            // vector<int> o{A_i, B_i, P_i, Q_i, C_i, D_i};
+                            // cout << "case 1: "; printVec(o);
+
+                            if (delta2 + d[A][D] - d[C][D] < 0) { // improving 3-opt move
+                                swapAdjacentSegments(tour, position, Q_i, A_i, B_i, C_i);
+                                max = maximum(max, d[B][P], d[Q][C], d[A][D]);
+                                locallyOptimal = false;
+                                
+                                goto next_AB;
+                            }
+                        }
+                    }
+                }
+                
             }
             next_AB: continue;
         }
@@ -1414,9 +944,9 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     }
 
     // Local optimization
-    twoOptLoop(tour, d, neighbor, position, max, min);
-    twoHOptLoop(tour, d, neighbor, position, max, min);
-    threeOptLoopV2(tour, d, neighbor, position, max, min);
+    twoOptLoopV2(tour, d, neighbor, position, max, min);
+    // twoHOptLoop(tour, d, neighbor, position, max, min);
+    threeOptLoopV3(tour, d, neighbor, position, max, min);
 
     // Some main loop statistics.
     size_t i = 0;                        // Number of iterations of main loop.
@@ -1458,16 +988,13 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
 
         // Optimize tour with 2-opt + 3-opt.
         // startWatch();
-        // twoOptLoop(tour, d, neighbor, position, max, min);
-        twoOptLoopV2(tour, d, neighbor, position, max, min);
-        twoHOptLoop(tour, d, neighbor, position, max, min);
-        threeOptLoopV3(tour, d, neighbor, position, max, min);
+        // twoOptLoopV2(tour, d, neighbor, position, max, min);
+        // threeOptLoopV3(tour, d, neighbor, position, max, min);
+        kOpt(tour, d, neighbor, position, max, min);
         // stopWatch();
         // startWatch();
-        // threeOptLoopV2(tour, d, neighbor, position, max, min);
         // stopWatch();
         // cout << "\n";
-        // threeOpt(tour, d, neighbor, position, max, min, threeOptDeadline);
         
         // compare with best tour
         long long tourLength = length(tour, d);
@@ -1536,7 +1063,6 @@ void benchMark(Matrix<long> &d) {
     
     cout << "initial len t1: " << length(t1, d) << "\n";
     startWatch();
-    threeOptLoopV2(t1, d, neighbor, p1, mx1, mi1);
     cout << "len t1: " << length(t1, d) << "\n";
     stopWatch();
 

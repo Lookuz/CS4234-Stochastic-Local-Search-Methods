@@ -454,8 +454,7 @@ inline bool isAdjacent(vector<int> &tour, vector<int> &position, int &t1, int &t
 
 // twoOptLoop, but we shortcut the search using partial gain method
 inline void twoOptLoopV2(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long& max, long min) {
+        const Matrix<int>& neighbor, vector<int> &position) {
     size_t N = d.rows(); // Number of cities.
 
     // Candidate edges uv, wz and their positions in tour.
@@ -485,17 +484,12 @@ inline void twoOptLoopV2(vector<int>& tour, const Matrix<long>& d,
                 if (v == w || u == z) {
                     continue; // Skip adjacent edges.
                 }
-                
-                if (d[u][w] + min > d[u][v] + max) {
-                    break; // Go to next edge uv.
-                }
 
                 if (d[u][w] + d[v][z] < d[u][v] + d[w][z]) {
                     //   --u w--        --u-w->
                     //      X     ===>
                     //   <-z v->        <-z-v--
                     reverse(tour, v_i % N, w_i, position); // implicitly deletes and adds edges
-                    max = maximum(max, d[u][w], d[v][z]);
                     locallyOptimal = false;
                     break;
                 }
@@ -505,8 +499,7 @@ inline void twoOptLoopV2(vector<int>& tour, const Matrix<long>& d,
 }
 
 inline void twoHOptLoop(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long& max, long min) {
+        const Matrix<int>& neighbor, vector<int> &position) {
     size_t N = d.rows(); // Number of cities.
 
     // Candidate edges uv, wz and their positions in tour.
@@ -557,9 +550,6 @@ inline void twoHOptLoop(vector<int>& tour, const Matrix<long>& d,
                     }
                     tour[cur] = A;
                     position[A] = cur;
-                    // update
-                    max = maximum(max, d[pA][sA], d[B][A]);
-                    max = maximum(max, max, d[A][sB]);
                     locallyOptimal = false;
                     break;
                 }
@@ -570,8 +560,7 @@ inline void twoHOptLoop(vector<int>& tour, const Matrix<long>& d,
 
 // 3-opt properly done
 inline void threeOptLoopV3(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long &max, long min) {
+        const Matrix<int>& neighbor, vector<int> &position) {
     int N = tour.size();
 
     int A, B, P, Q, C, D;
@@ -626,9 +615,7 @@ inline void threeOptLoopV3(vector<int>& tour, const Matrix<long>& d,
 
                             if (delta2 + d[A][D] - d[C][D] < 0) { // improving 3-opt move
                                 swapAdjacentSegments(tour, position, Q_i, A_i, B_i, C_i);
-                                max = maximum(max, d[B][P], d[Q][C], d[A][D]);
                                 locallyOptimal = false;
-                                
                                 goto next_AB;
                             }
                         }
@@ -662,7 +649,6 @@ inline void threeOptLoopV3(vector<int>& tour, const Matrix<long>& d,
                             if (delta2 + d[A][D] - d[C][D] < 0) { // improving 3-opt move
                                 reverse(tour, D_i, Q_i, position);
                                 reverse(tour, P_i, A_i, position);
-                                max = maximum(max, d[B][P], d[Q][C], d[A][D]);
                                 locallyOptimal = false;
                                 goto next_AB;
                             }
@@ -677,8 +663,7 @@ inline void threeOptLoopV3(vector<int>& tour, const Matrix<long>& d,
 
 // merges 2 and 3 opt
 inline void kOpt(vector<int>& tour, const Matrix<long>& d,
-        const Matrix<int>& neighbor, vector<int> &position,
-        long &max, long min) {
+        const Matrix<int>& neighbor, vector<int> &position) {
     int N = tour.size();
 
     int A, B, P, Q, C, D;
@@ -714,7 +699,6 @@ inline void kOpt(vector<int>& tour, const Matrix<long>& d,
                     // try see if 2-opt change here is improving
                     if (delta1 - d[P][Q] + d[Q][A] < 0) {
                         reverse(tour, B_i, Q_i, position);
-                        max = maximum(max, d[B][P], d[Q][A]);
                         locallyOptimal = false;
                         goto next_AB;
                     }
@@ -742,7 +726,6 @@ inline void kOpt(vector<int>& tour, const Matrix<long>& d,
                             if (delta2 + d[A][D] - d[C][D] < 0) { // improving 3-opt move
                                 reverse(tour, D_i, Q_i, position);
                                 reverse(tour, P_i, A_i, position);
-                                max = maximum(max, d[B][P], d[Q][C], d[A][D]);
                                 locallyOptimal = false;
                                 goto next_AB;
                             }
@@ -776,7 +759,6 @@ inline void kOpt(vector<int>& tour, const Matrix<long>& d,
 
                             if (delta2 + d[A][D] - d[C][D] < 0) { // improving 3-opt move
                                 swapAdjacentSegments(tour, position, Q_i, A_i, B_i, C_i);
-                                max = maximum(max, d[B][P], d[Q][C], d[A][D]);
                                 locallyOptimal = false;
                                 
                                 goto next_AB;
@@ -920,7 +902,6 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     chrono::milliseconds buffer(THREE_OPT_BUFFER_TIME);
     auto threeOptDeadline = deadline - buffer; // three OPT must terminate slightly earlier due to slowness
 
-    const long min = minDistance(d); // Shortest distance.
     const size_t N = d.rows();       // Number of cities.
 
     if (N == 1) { // test case 7 is a single city
@@ -934,19 +915,15 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
     vector<int> tour = multiFrag(d);
     // vector<int> tour = twoApprox(d);
 
-    // Initialize variable max
     // initialize position vector
     vector<int> position(N);
-    long max = 0;
     for (int i = 0; i < N; ++i) {
-        max = std::max(max, d[tour[i]][tour[(i + 1) % N]]); // i think this is the correct one
-        position[tour[i]] = i;                  // tour[i] is i:th city in tour.
+        position[tour[i]] = i;
     }
 
     // Local optimization
-    twoOptLoopV2(tour, d, neighbor, position, max, min);
-    // twoHOptLoop(tour, d, neighbor, position, max, min);
-    threeOptLoopV3(tour, d, neighbor, position, max, min);
+    twoOptLoopV2(tour, d, neighbor, position);
+    threeOptLoopV3(tour, d, neighbor, position);
 
     // Some main loop statistics.
     size_t i = 0;                        // Number of iterations of main loop.
@@ -979,18 +956,16 @@ vector<int> approximate(Matrix<long> &d, const chrono::time_point<T>& deadline) 
             }
         }
 
-        // Update max / position needed by fast 2/3-opt.
-        max = 0;
+        // Update position
         for (int j = 0; j < N; ++j) {
-            max = std::max(max, d[tour[j]][tour[(j + 1) % N]]);
             position[tour[j]] = j;
         }
 
         // Optimize tour with 2-opt + 3-opt.
         // startWatch();
-        // twoOptLoopV2(tour, d, neighbor, position, max, min);
-        // threeOptLoopV3(tour, d, neighbor, position, max, min);
-        kOpt(tour, d, neighbor, position, max, min);
+        // twoOptLoopV2(tour, d, neighbor, position);
+        // threeOptLoopV3(tour, d, neighbor, position);
+        kOpt(tour, d, neighbor, position);
         // stopWatch();
         // startWatch();
         // stopWatch();
@@ -1052,12 +1027,6 @@ void benchMark(Matrix<long> &d) {
     vector<int> p1 = getPositionVec(t1);
     vector<int> p2 = getPositionVec(t2);
     vector<int> p3 = getPositionVec(t3);
-    long mx1 = getMaxWeight(t1, d);
-    long mx2 = getMaxWeight(t2, d);
-    long mx3 = getMaxWeight(t3, d);
-    long mi1 = minDistance(d);
-    long mi2 = minDistance(d);
-    long mi3 = minDistance(d);
 
     auto dl = now() + chrono::milliseconds(EXECUTION_DURATION);
     
@@ -1068,7 +1037,7 @@ void benchMark(Matrix<long> &d) {
 
     cout << "initial len t2: " << length(t2, d) << "\n";
     startWatch();
-    threeOptLoopV3(t2, d, neighbor, p2, mx2, mi2);
+    threeOptLoopV3(t2, d, neighbor, p2);
     cout << "len t2: " << length(t2, d) << "\n";
     stopWatch();
     
